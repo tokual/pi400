@@ -480,6 +480,9 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 'progress_hooks': [lambda d: asyncio.create_task(
                     update_download_progress(status_msg, d)
                 )],
+                # For Twitter/X: skip quoted tweets and only get the main tweet
+                'extract_flat': False,
+                'playlistend': 1,  # Only download the first item (main tweet)
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
