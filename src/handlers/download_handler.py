@@ -37,9 +37,9 @@ QUALITY_SETTINGS = {
 
 # Estimated file size per minute of video (in MB) for different qualities
 EST_SIZE_PER_MINUTE = {
-    '720p': 0.85,   # ~0.85 MB per minute (with q25)
-    '480p': 0.50,   # ~0.50 MB per minute (with q24)
-    '360p': 0.30,   # ~0.30 MB per minute (with q24)
+    '720p': 2.0,    # ~2.0 MB per minute (720p, quality=25)
+    '480p': 1.2,    # ~1.2 MB per minute (480p, quality=24)
+    '360p': 0.7,    # ~0.7 MB per minute (360p, quality=24)
 }
 
 
@@ -282,8 +282,8 @@ async def upload_original_and_ask_encoding(user_id: int, message: types.Message,
         
         try:
             await message.answer(
-                "⚙️ *Encoding Options*\\n\\n"
-                "Would you like to encode the video to a smaller size?\\n\\n"
+                "⚙️ *Encoding Options*\n\n"
+                "Would you like to encode the video to a smaller size?\n\n"
                 "_Estimates include 10% safety buffer_",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
@@ -916,9 +916,9 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
                 
                 try:
                     await message.answer(
-                        "⚙️ *Encoding Required*\\n\\n"
-                        f"📏 Source file: {downloaded_size / (1024*1024):.1f}MB (too large to upload)\\n\\n"
-                        "Choose encoding quality to reduce file size:\\n\\n"
+                        "⚙️ *Encoding Required*\n\n"
+                        f"📏 Source file: {downloaded_size / (1024*1024):.1f}MB (too large to upload)\n\n"
+                        "Choose encoding quality to reduce file size:\n\n"
                         "_Estimates include 10% safety buffer_",
                         reply_markup=keyboard,
                         parse_mode="Markdown"
