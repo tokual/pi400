@@ -9,6 +9,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiohttp import TCPConnector, ClientSession
 
 from src.database import Database
 from src.utils import logger, get_user_setting, set_user_setting
@@ -26,6 +27,7 @@ class BotConfig:
     DOWNLOAD_DIR = os.getenv('DOWNLOAD_DIR', '/tmp')
     MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE_MB', '50')) * 1024 * 1024
     HANDBRAKE_PRESET = os.getenv('HANDBRAKE_PRESET', 'Very Fast 720p30')
+    UPLOAD_TIMEOUT_SECONDS = int(os.getenv('UPLOAD_TIMEOUT_SECONDS', '600'))
 
 
 class DownloadStates(StatesGroup):
@@ -478,8 +480,19 @@ async def main():
     # Add authorized user to whitelist if not exists
     await db.add_user(BotConfig.ALLOWED_USER_ID, is_whitelisted=True)
     
-    # Initialize bot and dispatcher
-    bot = Bot(token=BotConfig.BOT_TOKEN)
+    # Initialize bot with optimized aiohttp session for reliable uploads
+    # Configure TCPConnector with proper timeouts and connection pooling
+    connector = TCPConnector(
+        limit=100,  # Limit total connections
+        limit_per_host=5,  # Limit connections per host
+        ttl_dns_cache=300,
+        tcp_keepalive=True,  # Enable TCP keep-alive for long operations
+    )
+    session = ClientSession(
+        connector=connector,
+        timeout=asyncio.TimeoutError if not hasattr(asyncio, 'TimeoutError') else None
+    )
+    bot = Bot(token=BotConfig.BOT_TOKEN, session=session)
     dp = Dispatcher()
     
     # Register handlers

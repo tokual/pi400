@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import subprocess
 import re
-from typing import Optional
+from typing import Optional, Callable, Any
 from urllib.parse import urlparse
 import yt_dlp
 
@@ -20,6 +20,7 @@ from src.utils import logger
 # Concurrency control: Limit simultaneous downloads to prevent bot rate limits
 # Using a semaphore to allow 1 download per user at a time
 _download_semaphores = {}
+_upload_semaphores = {}  # Limit simultaneous uploads per user
 
 
 SUPPORTED_DOMAINS = [
@@ -40,6 +41,103 @@ EST_SIZE_PER_MINUTE = {
     '480p': 0.50,   # ~0.50 MB per minute (with q24)
     '360p': 0.30,   # ~0.30 MB per minute (with q24)
 }
+
+
+def is_retryable_error(error: Exception) -> bool:
+    """Classify if an error is retryable or not.
+    
+    Retryable: Transport, timeout, connection errors
+    Non-retryable: Auth, file not found, permission errors
+    """
+    error_str = str(error).lower()
+    
+    # Retryable errors
+    retryable_keywords = [
+        'closing transport',
+        'connection reset',
+        'connection refused',
+        'timeout',
+        'timed out',
+        'temporary failure',
+        'network unreachable',
+        'no address associated',
+        'broken pipe',
+        'cannot write',
+        'read timeout',
+        'write timeout',
+        'connection aborted',
+    ]
+    
+    for keyword in retryable_keywords:
+        if keyword in error_str:
+            return True
+    
+    # Non-retryable errors
+    non_retryable_keywords = [
+        'unauthorized',
+        'forbidden',
+        'not found',
+        'permission denied',
+        'invalid token',
+        'bad request',
+        'invalid file',
+    ]
+    
+    for keyword in non_retryable_keywords:
+        if keyword in error_str:
+            return False
+    
+    # Default to retryable for upload errors to be safe
+    return True
+
+
+async def retry_with_backoff(
+    func: Callable,
+    max_attempts: int = 3,
+    initial_delay: float = 1.0,
+    max_delay: float = 30.0,
+    user_id: int = None
+) -> Any:
+    """Retry a function with exponential backoff.
+    
+    Args:
+        func: Async function to retry
+        max_attempts: Maximum number of attempts
+        initial_delay: Initial delay in seconds
+        max_delay: Maximum delay in seconds
+        user_id: User ID for logging
+    
+    Returns:
+        Result of function call
+        
+    Raises:
+        Last exception if all attempts fail
+    """
+    last_error = None
+    delay = initial_delay
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await func()
+        except Exception as e:
+            last_error = e
+            
+            # Check if error is retryable
+            if not is_retryable_error(e):
+                logger.warning(f"Non-retryable error for user {user_id}: {e}")
+                raise
+            
+            # Don't retry on last attempt
+            if attempt == max_attempts:
+                logger.error(f"All {max_attempts} upload attempts failed for user {user_id}: {e}")
+                raise
+            
+            logger.warning(f"Upload attempt {attempt}/{max_attempts} failed for user {user_id}: {e}. Retrying in {delay}s...")
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, max_delay)  # Exponential backoff with cap
+    
+    # Should never reach here
+    raise last_error
 
 
 def estimate_encoding_sizes(duration_seconds: int) -> dict:
@@ -139,15 +237,25 @@ async def upload_original_and_ask_encoding(user_id: int, message: types.Message,
         # Get file size
         file_size_mb = os.path.getsize(original_file) / (1024 * 1024)
         
-        # Upload original video
+        # Upload original video with retry logic
         try:
             upload_msg = await message.answer("📤 Uploading original video...")
-            video_msg = await message.bot.send_video(
-                chat_id=user_id,
-                video=FSInputFile(original_file),
-                caption=f"📹 *Original Video* ({file_size_mb:.1f}MB)\\n\\nChoose encoding quality below or skip.",
-                parse_mode="Markdown"
-            )
+            
+            # Get or create semaphore for this user to limit concurrent uploads
+            if user_id not in _upload_semaphores:
+                _upload_semaphores[user_id] = asyncio.Semaphore(1)
+            
+            async with _upload_semaphores[user_id]:
+                async def upload_task():
+                    return await message.bot.send_video(
+                        chat_id=user_id,
+                        video=FSInputFile(original_file),
+                        caption=f"📹 *Original Video* ({file_size_mb:.1f}MB)\\n\\nChoose encoding quality below or skip.",
+                        parse_mode="Markdown"
+                    )
+                
+                video_msg = await retry_with_backoff(upload_task, max_attempts=3, user_id=user_id)
+            
             await upload_msg.delete()
         except Exception as e:
             logger.error(f"Failed to upload original for user {user_id}: {e}")
@@ -161,6 +269,7 @@ async def upload_original_and_ask_encoding(user_id: int, message: types.Message,
         try:
             await state.update_data(
                 original_file=original_file,
+                temp_dir=temp_dir,
                 duration_seconds=duration_seconds,
                 original_uploaded=True
             )
@@ -366,6 +475,7 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 'quiet': False,
                 'no_warnings': False,
                 'socket_timeout': 30,
+                'noplaylist': True,
                 'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
                 'progress_hooks': [lambda d: asyncio.create_task(
                     update_download_progress(status_msg, d)
@@ -949,6 +1059,7 @@ async def handle_encoding_choice(user_id: int, message: types.Message, state: FS
         # Check output file size
         try:
             output_size = os.path.getsize(output_file)
+            logger.info(f"Encoded {chosen_quality} file size: {output_size / (1024*1024):.1f}MB for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to get output file size for user {user_id}: {e}")
             try:
@@ -1004,12 +1115,20 @@ async def handle_encoding_choice(user_id: int, message: types.Message, state: FS
             return
         
         try:
-            video_msg = await message.bot.send_video(
-                chat_id=user_id,
-                video=FSInputFile(output_file),
-                caption=f"✅ *Your {chosen_quality} Video*!\n\n📏 Size: {output_size / (1024*1024):.1f}MB",
-                parse_mode="Markdown"
-            )
+            # Get or create semaphore for this user to limit concurrent uploads
+            if user_id not in _upload_semaphores:
+                _upload_semaphores[user_id] = asyncio.Semaphore(1)
+            
+            async with _upload_semaphores[user_id]:
+                async def upload_task():
+                    return await message.bot.send_video(
+                        chat_id=user_id,
+                        video=FSInputFile(output_file),
+                        caption=f"✅ *Your {chosen_quality} Video*!\n\n📏 Size: {output_size / (1024*1024):.1f}MB",
+                        parse_mode="Markdown"
+                    )
+                
+                video_msg = await retry_with_backoff(upload_task, max_attempts=3, user_id=user_id)
         except Exception as e:
             logger.error(f"Upload failed for user {user_id}: {e}")
             try:
@@ -1046,19 +1165,6 @@ async def handle_encoding_choice(user_id: int, message: types.Message, state: FS
         except Exception as e:
             logger.error(f"Failed to send completion message to user {user_id}: {e}")
         
-        # Cleanup temp directory in background
-        import threading
-        def cleanup():
-            try:
-                if os.path.isdir(temp_dir):
-                    shutil.rmtree(temp_dir)
-                    logger.debug(f"Cleaned up temp directory for user {user_id}")
-            except Exception as e:
-                logger.warning(f"Failed to cleanup temp directory for user {user_id}: {e}")
-        
-        thread = threading.Thread(target=cleanup, daemon=True)
-        thread.start()
-        
         await state.clear()
         logger.info(f"Download complete for user {user_id}: {chosen_quality}")
         
@@ -1074,5 +1180,27 @@ async def handle_encoding_choice(user_id: int, message: types.Message, state: FS
             except Exception:
                 pass
         await state.clear()
+    
+    finally:
+        # Ensure temp directory cleanup on all paths (success or error)
+        try:
+            state_data = await state.get_data()
+            temp_dir = state_data.get('temp_dir')
+            
+            if temp_dir and os.path.isdir(temp_dir):
+                import threading
+                def cleanup():
+                    try:
+                        if os.path.isdir(temp_dir):
+                            shutil.rmtree(temp_dir)
+                            logger.debug(f"Cleaned up temp directory for user {user_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup temp directory for user {user_id}: {e}")
+                
+                thread = threading.Thread(target=cleanup, daemon=True)
+                thread.start()
+        except Exception as e:
+            logger.warning(f"Error in finally cleanup for user {user_id}: {e}")
+
 
 # End of file
