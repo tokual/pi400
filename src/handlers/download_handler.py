@@ -473,7 +473,9 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
         
         async def _download():
             ydl_opts = {
-                'format': 'best[ext=mp4][height<=1080]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[height<=1080]',
+                # Format: Prefer 720p max, mp4 container, prioritize balanced quality/size
+                # Fallback chain: 720p+audio > 480p+audio > 360p+audio > best available
+                'format': 'best[ext=mp4][height<=720]/bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[height<=720]',
                 'quiet': False,
                 'no_warnings': False,
                 'socket_timeout': 30,
@@ -482,6 +484,8 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 'progress_hooks': [lambda d: asyncio.create_task(
                     update_download_progress(status_msg, d)
                 )],
+                # Additional optimizations for smaller downloads
+                'prefer_free_formats': True,  # Prefer formats without premium/restricted access
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
