@@ -61,11 +61,16 @@ async def get_file_size(url: str) -> Optional[tuple[int, int]]:
                 if duration and tbr:
                     filesize = int(duration * tbr * 125)  # tbr is in kbit/s
             
-            # Get duration
-            duration = info.get('duration', 0)
+            # Get duration - required for size estimation
+            duration = info.get('duration')
             
-            if filesize and duration:
+            # Return filesize if available (even if 0), use duration for estimation
+            if filesize is not None and duration:
                 return int(filesize), int(duration)
+            
+            # If we have duration but no filesize, still return it for estimation
+            if duration:
+                return None, int(duration)
             
             return None, None
     except Exception as e:
@@ -211,17 +216,21 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
         await status_msg.edit_text("📊 Analyzing video metadata...")
         
         result = await get_file_size(url)
+        file_size = None
+        duration = None
         
-        if result is None:
+        if result:
+            file_size, duration = result
+        
+        # Check if file size exceeds limit
+        if file_size is None:
             await status_msg.edit_text(
                 "⚠️ *Could not determine video size*\n\n"
                 "Proceeding with caution. The encoded file may be large.\n\n"
                 "If it fails, try a shorter video or faster preset."
             )
             logger.warning(f"Could not get file size for user {user_id}")
-        elif result[0] > config.MAX_FILE_SIZE:  # file_size > 50MB
-            file_size, duration = result
-            
+        elif file_size > config.MAX_FILE_SIZE:  # file_size > 50MB
             # Get current preset to estimate encoded size
             preset = await db.get_user_setting(user_id, 'encoding_preset') or config.HANDBRAKE_PRESET
             estimated_encoded = estimate_encoded_size(duration or 0, preset)
