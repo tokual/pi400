@@ -510,13 +510,21 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
                 logger.debug(f"Failed to delete status message: {e}")
 
 
-async def execute_confirmed_download(message: types.Message, state: FSMContext, db: Database, url: str, config, download_states=None):
+async def execute_confirmed_download(user_id: int, message: types.Message, state: FSMContext, db: Database, url: str, config, download_states=None):
     """Execute download after user confirmation (skips file size re-check).
     
     This function is called after the user confirms a large file download,
     or when file size is acceptable. It handles the actual download, encode, and upload.
+    
+    Args:
+        user_id: The ID of the user who initiated the download (not from message.from_user)
+        message: The message to use for status updates
+        state: FSM context
+        db: Database instance
+        url: The video URL to download
+        config: Bot configuration
+        download_states: FSM states (optional)
     """
-    user_id = message.from_user.id
     status_msg = None
     temp_dir = None
     

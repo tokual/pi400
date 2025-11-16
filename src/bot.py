@@ -296,7 +296,7 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
             logger.error(f"Failed to clear pending URL for user {user_id}: {e}")
         
         # Process the download (skip file size re-check)
-        await download_handler.execute_confirmed_download(new_message, state, db, pending_url, BotConfig, DownloadStates)
+        await download_handler.execute_confirmed_download(user_id, new_message, state, db, pending_url, BotConfig, DownloadStates)
     
     elif callback_query.data == "confirm_no":
         # User declined
