@@ -202,7 +202,7 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
         
         async def _download():
             ydl_opts = {
-                'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+                'format': 'best[ext=mp4][height<=1080]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
                 'quiet': False,
                 'no_warnings': False,
                 'socket_timeout': 30,
