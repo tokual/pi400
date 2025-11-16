@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import subprocess
+import re
 from typing import Optional
 from urllib.parse import urlparse
 import yt_dlp
@@ -102,6 +103,42 @@ def estimate_encoded_size(duration_seconds: int, preset: str) -> int:
     return int(encoded_size * 1.05)  # Add 5% overhead
 
 
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename to be compatible with HandBrake and filesystems.
+    
+    Removes or replaces problematic characters:
+    - Colons (:) - not allowed in Windows filenames
+    - Slashes (/ and backslash) - directory separators
+    - Other special characters that cause issues
+    """
+    # Remove or replace problematic characters
+    filename = filename.replace(':', '-')  # Replace colons with dashes
+    filename = filename.replace('/', '-')  # Replace forward slashes with dashes
+    filename = filename.replace('\\', '-')  # Replace backslashes with dashes
+    filename = filename.replace('?', '')   # Remove question marks
+    filename = filename.replace('"', '')   # Remove quotes
+    filename = filename.replace('<', '')   # Remove angle brackets
+    filename = filename.replace('>', '')
+    filename = filename.replace('|', '-')  # Replace pipes with dashes
+    filename = filename.replace('*', '')   # Remove asterisks
+    
+    # Also handle unicode special characters that look like punctuation
+    filename = re.sub(r'[^\w\s\-\.]', '', filename)  # Keep only word chars, spaces, dashes, dots
+    
+    # Remove leading/trailing spaces and dots
+    filename = filename.strip('. ')
+    
+    # Limit length to 200 chars (leave room for extension)
+    if len(filename) > 200:
+        filename = filename[:200]
+    
+    # Ensure filename is not empty
+    if not filename or filename.isspace():
+        filename = 'video'
+    
+    return filename
+
+
 async def download_video(url: str, temp_dir: str, status_msg: types.Message) -> Optional[str]:
     """Download video using yt-dlp."""
     try:
@@ -119,7 +156,22 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message) -> 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-            return filename
+            
+            # Sanitize the filename for HandBrake compatibility
+            dir_path = os.path.dirname(filename)
+            file_basename = os.path.basename(filename)
+            name_without_ext = os.path.splitext(file_basename)[0]
+            ext = os.path.splitext(file_basename)[1]
+            
+            sanitized_name = sanitize_filename(name_without_ext) + ext
+            sanitized_path = os.path.join(dir_path, sanitized_name)
+            
+            # Rename the file if necessary
+            if filename != sanitized_path:
+                os.rename(filename, sanitized_path)
+                logger.info(f"Renamed: {file_basename} -> {sanitized_name}")
+            
+            return sanitized_path
     except Exception as e:
         logger.error(f"Download error: {str(e)}")
         raise
