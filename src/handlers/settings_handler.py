@@ -84,7 +84,11 @@ async def preset_selection_handler(callback_query: types.CallbackQuery, state: F
 
 async def register_handlers(dp: Dispatcher, db: Database):
     """Register settings handlers."""
+    
+    async def preset_selection_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
+        return await preset_selection_handler(callback_query, state, db)
+    
     dp.callback_query.register(
-        preset_selection_handler,
+        preset_selection_wrapper,
         F.data.startswith("preset_")
     )
