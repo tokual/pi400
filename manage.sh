@@ -86,6 +86,10 @@ cmd_update() {
     echo "Stopping service..."
     sudo systemctl stop "$SERVICE_NAME"
     
+    # Fix git ownership issue
+    echo "Configuring git safe directory..."
+    sudo git config --global --add safe.directory "$BOT_DIR"
+    
     # Update from git
     echo "Pulling latest changes from git..."
     cd "$BOT_DIR"
@@ -98,10 +102,10 @@ cmd_update() {
         exit 1
     fi
     
-    # Restart service (.env is preserved)
+    # Restart service (startup.sh will handle dependency updates)
     echo "Restarting service..."
     sudo systemctl start "$SERVICE_NAME"
-    sleep 2
+    sleep 3
     
     if sudo systemctl is-active --quiet "$SERVICE_NAME"; then
         echo -e "${GREEN}✓ Bot updated and restarted${NC}"
