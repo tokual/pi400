@@ -398,7 +398,8 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
                 await status_msg.edit_text(
                     "⚠️ *Could not determine video size*\n\n"
                     "Proceeding with caution. The encoded file may be large.\n\n"
-                    "If it fails, try a shorter video or faster preset."
+                    "If it fails, try a shorter video or faster preset.",
+                    parse_mode="Markdown"
                 )
             except Exception as e:
                 logger.warning(f"Failed to update status for user {user_id}: {e}")
@@ -453,7 +454,8 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
                         f"Using preset: *{preset}*\n\n"
                         f"The source is large, but encoding should fit within limits.\n\n"
                         f"Continue with download?",
-                        reply_markup=keyboard
+                        reply_markup=keyboard,
+                        parse_mode="Markdown"
                     )
                 except Exception as e:
                     logger.error(f"Failed to show confirmation for user {user_id}: {e}")
@@ -471,7 +473,8 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
                         f"💡 Try:\n"
                         f"• A shorter video\n"
                         f"• Very Fast preset (Settings → ⚙️)\n"
-                        f"• A different video"
+                        f"• A different video",
+                        parse_mode="Markdown"
                     )
                 except Exception as e:
                     logger.warning(f"Failed to update status for user {user_id}: {e}")
@@ -553,7 +556,8 @@ async def execute_confirmed_download(message: types.Message, state: FSMContext, 
                         f"💡 Try:\n"
                         f"• A shorter video\n"
                         f"• A different video\n"
-                        f"• Check your internet connection"
+                        f"• Check your internet connection",
+                        parse_mode="Markdown"
                     )
                 except Exception:
                     pass
@@ -568,7 +572,8 @@ async def execute_confirmed_download(message: types.Message, state: FSMContext, 
                         f"• Invalid or expired\n"
                         f"• From an unsupported platform\n"
                         f"• Protected/private\n\n"
-                        f"Try another video or check the URL."
+                        f"Try another video or check the URL.",
+                        parse_mode="Markdown"
                     )
                 except Exception:
                     pass
@@ -604,7 +609,8 @@ async def execute_confirmed_download(message: types.Message, state: FSMContext, 
                         f"💡 Try:\n"
                         f"• A shorter video\n"
                         f"• A faster preset (Settings → ⚙️)\n"
-                        f"• A different video"
+                        f"• A different video",
+                        parse_mode="Markdown"
                     )
                 except Exception:
                     pass
@@ -630,7 +636,8 @@ async def execute_confirmed_download(message: types.Message, state: FSMContext, 
                         f"💡 Try:\n"
                         f"• A shorter video\n"
                         f"• A faster preset (Settings → ⚙️)\n"
-                        f"• Lower resolution on source"
+                        f"• Lower resolution on source",
+                        parse_mode="Markdown"
                     )
                 except Exception:
                     pass
@@ -701,7 +708,8 @@ async def execute_confirmed_download(message: types.Message, state: FSMContext, 
                     await status_msg.edit_text(
                         f"❌ *Unexpected Error*\n\n"
                         f"Something went wrong: {str(e)[:80]}\n\n"
-                        f"Please try again or contact support."
+                        f"Please try again or contact support.",
+                        parse_mode="Markdown"
                     )
                 except Exception as edit_error:
                     logger.error(f"Failed to send error message to user {user_id}: {edit_error}")
