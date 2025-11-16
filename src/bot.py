@@ -278,11 +278,12 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
         # Get message object from callback
         message = callback_query.message
         
-        # Update the message to show download is starting
+        # Delete the confirmation message to clean up the chat
+        # (execute_confirmed_download will send fresh status messages)
         try:
-            await message.edit_text("⏳ Processing your video...", reply_markup=None)
+            await message.delete()
         except Exception as e:
-            logger.warning(f"Failed to edit confirmation message for user {user_id}: {e}")
+            logger.debug(f"Failed to delete confirmation message for user {user_id}: {e}")
         
         # Clear pending URL from database before processing
         try:
