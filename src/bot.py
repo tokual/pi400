@@ -21,10 +21,10 @@ class BotConfig:
     """Bot configuration."""
     
     BOT_TOKEN = os.getenv('BOT_TOKEN', '')
-    ALLOWED_USER_ID = 23682616
-    DOWNLOAD_DIR = '/tmp'
-    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
-    HANDBRAKE_PRESET = "Fast Mobile 720p30"
+    ALLOWED_USER_ID = int(os.getenv('ALLOWED_USER_ID', '23682616'))
+    DOWNLOAD_DIR = os.getenv('DOWNLOAD_DIR', '/tmp')
+    MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE_MB', '50')) * 1024 * 1024
+    HANDBRAKE_PRESET = os.getenv('HANDBRAKE_PRESET', 'Very Fast 720p30')
 
 
 class DownloadStates(StatesGroup):

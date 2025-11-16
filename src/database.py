@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional, List
 
-DB_PATH = os.getenv('DATABASE_FILE', 'bot.db')
+DB_PATH = os.getenv('DATABASE_FILE', '/opt/video-bot/bot.db')
 
 
 class Database:

@@ -9,9 +9,10 @@ from src.utils import logger
 
 # Encoding presets available
 ENCODING_PRESETS = {
-    '⚡ Fast (1h+ video)': 'Fast Mobile 720p',
-    '⚙️ Balanced (default)': 'Fast Mobile 720p30',
-    '🎬 Quality (short video)': 'Medium Mobile 720p30',
+    '⚡ Very Fast 720p30 (1-2x)': 'Very Fast 720p30',
+    '⚙️ Fast 720p30 (2-3x)': 'Fast 720p30',
+    '🎬 Fast 1080p30 (3-5x)': 'Fast 1080p30',
+    '🎯 HQ 720p30 (4-6x)': 'HQ 720p30 Surround',
 }
 
 
@@ -20,7 +21,7 @@ async def show_settings_menu(callback_query: types.CallbackQuery, state: FSMCont
     user_id = callback_query.from_user.id
     
     # Get current preset
-    current_preset = await db.get_user_setting(user_id, 'encoding_preset') or 'Fast Mobile 720p30'
+    current_preset = await db.get_user_setting(user_id, 'encoding_preset') or 'Very Fast 720p30'
     
     keyboard_buttons = []
     for label, preset_value in ENCODING_PRESETS.items():
@@ -41,9 +42,10 @@ async def show_settings_menu(callback_query: types.CallbackQuery, state: FSMCont
     settings_text = (
         "⚙️ **Encoding Settings**\n\n"
         "**Preset:** Choose encoding speed/quality tradeoff\n"
-        "• Fast: Lower quality, faster (1-2x real time)\n"
-        "• Balanced: Good quality, reasonable time\n"
-        "• Quality: Best quality, slower (3-5x real time)\n\n"
+        "• Very Fast 720p30: Fastest, lower quality (~1-2x real time)\n"
+        "• Fast 720p30: Balanced, good quality (~2-3x real time)\n"
+        "• Fast 1080p30: Better quality, higher resolution (~3-5x real time)\n"
+        "• HQ 720p30: Best quality, slowest (~4-6x real time)\n\n"
         f"**Current:** {current_preset}"
     )
     

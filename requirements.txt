@@ -1,3 +1,7 @@
+# Python dependencies for Telegram Video Bot
+# Note: HandBrake CLI must be installed via system package manager
+# On Debian/Raspberry Pi OS: sudo apt-get install handbrake-cli ffmpeg
+
 aiogram==3.0.0
 aiosqlite==0.19.0
 yt-dlp==2024.10.22
