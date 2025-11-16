@@ -30,16 +30,17 @@ SUPPORTED_DOMAINS = [
 
 # Quality settings for different resolutions (quality value, description)
 QUALITY_SETTINGS = {
-    '720p': {'quality': '25', 'label': '720p (faster)'},
-    '480p': {'quality': '24', 'label': '480p (balanced)'},
-    '360p': {'quality': '24', 'label': '360p (standard)'},
+    '720p': {'quality': '28', 'label': '720p (smaller, slower)'},
+    '480p': {'quality': '28', 'label': '480p (recommended)'},
+    '360p': {'quality': '30', 'label': '360p (tiny, slowest)'},
 }
 
 # Estimated file size per minute of video (in MB) for different qualities
+# Based on empirical results: aggressive compression for mobile/Telegram compatibility
 EST_SIZE_PER_MINUTE = {
-    '720p': 2.0,    # ~2.0 MB per minute (720p, quality=25)
-    '480p': 1.2,    # ~1.2 MB per minute (480p, quality=24)
-    '360p': 0.7,    # ~0.7 MB per minute (360p, quality=24)
+    '720p': 1.5,    # ~1.5 MB per minute (720p, quality=28, aac 96kbps)
+    '480p': 0.8,    # ~0.8 MB per minute (480p, quality=28, aac 96kbps) - empirically 17MB for 20min
+    '360p': 0.4,    # ~0.4 MB per minute (360p, quality=30, aac 96kbps)
 }
 
 
@@ -587,14 +588,17 @@ async def update_download_progress(message: types.Message, data: dict):
 
 
 async def encode_with_handbrake(input_file: str, output_file: str, preset: str, status_msg: types.Message, quality: str = '24') -> bool:
-    """Encode video using HandBrake CLI.
+    """Encode video using HandBrake CLI for aggressive compression.
+    
+    Optimized for Raspberry Pi 4 performance and mobile device compatibility.
+    Uses lower bitrates and higher quality settings for minimal file size.
     
     Args:
         input_file: Path to input video file
         output_file: Path to output video file
         preset: HandBrake preset (Fast, Balanced, Quality)
         status_msg: Message to update with progress
-        quality: Quality setting (e.g., '24', '25'). Higher number = faster but lower quality.
+        quality: Quality setting (e.g., '24', '28', '30'). Higher number = faster/smaller but lower quality.
     """
     try:
         cmd = [
@@ -604,10 +608,10 @@ async def encode_with_handbrake(input_file: str, output_file: str, preset: str, 
             '--preset', preset,
             '-q', quality,
             '-e', 'x264',
-            '-b', '2000',
+            '--encoder-preset', 'veryfast',  # Faster encoding on Pi
             '-a', '1',
             '-E', 'aac',
-            '-B', '128',
+            '-B', '96',  # Reduced from 128kbps to 96kbps (sufficient for web video)
             '--format', 'av_mp4',
         ]
         
