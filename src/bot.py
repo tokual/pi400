@@ -275,15 +275,19 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
         logger.info(f"User {user_id} confirmed download")
         await callback_query.answer("✅ Starting download...")
         
-        # Get message object from callback
+        # Get message object and delete the confirmation dialog
         message = callback_query.message
-        
-        # Delete the confirmation message to clean up the chat
-        # (execute_confirmed_download will send fresh status messages)
         try:
             await message.delete()
         except Exception as e:
             logger.debug(f"Failed to delete confirmation message for user {user_id}: {e}")
+        
+        # Send a fresh message to use for status updates during download
+        try:
+            new_message = await message.answer("⏳ Processing your video...")
+        except Exception as e:
+            logger.error(f"Failed to send processing message for user {user_id}: {e}")
+            return
         
         # Clear pending URL from database before processing
         try:
@@ -292,7 +296,7 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
             logger.error(f"Failed to clear pending URL for user {user_id}: {e}")
         
         # Process the download (skip file size re-check)
-        await download_handler.execute_confirmed_download(message, state, db, pending_url, BotConfig, DownloadStates)
+        await download_handler.execute_confirmed_download(new_message, state, db, pending_url, BotConfig, DownloadStates)
     
     elif callback_query.data == "confirm_no":
         # User declined

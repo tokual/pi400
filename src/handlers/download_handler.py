@@ -340,6 +340,7 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
     """
     user_id = message.from_user.id
     status_msg = None
+    waiting_for_confirmation = False
     
     # Validate input parameters
     if not url or not isinstance(url, str):
@@ -460,6 +461,7 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
                 except Exception as e:
                     logger.error(f"Failed to show confirmation for user {user_id}: {e}")
                 logger.info(f"Confirmation dialog shown to user {user_id}")
+                waiting_for_confirmation = True
                 return
             else:
                 # Estimated size still too large
@@ -499,8 +501,9 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
         await state.clear()
     
     finally:
-        # Cleanup and delete status message on error
-        if status_msg:
+        # Only delete status message if not waiting for user confirmation
+        # (confirmation handler will delete it after user clicks yes/no)
+        if status_msg and not waiting_for_confirmation:
             try:
                 await status_msg.delete()
             except Exception as e:
