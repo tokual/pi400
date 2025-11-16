@@ -450,7 +450,14 @@ def sanitize_filename(filename: str) -> str:
 
 
 async def download_video(url: str, temp_dir: str, status_msg: types.Message, timeout: int = 3600) -> Optional[str]:
-    """Download video using yt-dlp.
+    """Download and optimize video using yt-dlp with native format selection.
+    
+    Uses dynamic resolution selection based on video duration:
+    - ≤60s: 720p H.264 + AAC at 5Mbps (for quality)
+    - >60s: 480p H.264 + AAC at 4Mbps (for smaller file size)
+    
+    Downloads directly as MP4 with H.264/AAC for Telegram compatibility.
+    No post-processing/re-encoding needed - stream copy only (remuxing).
     
     Args:
         url: Video URL (must be validated before calling)
@@ -471,29 +478,55 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
             logger.error(f"Temp directory does not exist: {temp_dir}")
             raise ValueError("Temporary directory not found")
         
-        async def _download():
+        async def _get_duration():
+            """Pre-fetch video duration for dynamic format selection."""
+            try:
+                with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    return info.get('duration', 120)  # Default 120s if unknown
+            except Exception as e:
+                logger.warning(f"Could not get duration: {e}. Defaulting to 480p.")
+                return 120  # Default to longer duration assumption (480p)
+        
+        async def _download(duration_seconds: int):
             # Local variable to avoid Python 3.13 scoping issues with nested async functions
             download_url = url
             
+            # Dynamically select resolution based on duration
+            # Short videos (≤60s): 720p for better quality
+            # Long videos (>60s): 480p for reasonable file size
+            if duration_seconds <= 60:
+                max_height = 720
+                max_vbr = 5000  # 5Mbps for short videos
+                logger.info(f"Short video ({duration_seconds}s): using 720p format")
+            else:
+                max_height = 480
+                max_vbr = 4000  # 4Mbps for longer videos
+                logger.info(f"Long video ({duration_seconds}s): using 480p format")
+            
+            # Format selection: H.264 video + AAC audio with VBR limiting
+            # bestvideo: Best H.264 video track at specified height
+            # bestaudio[acodec=aac]: Best AAC audio track
+            # /best: Fallback if separate streams not available
+            format_str = f'bestvideo[vcodec=h264][height<={max_height}][vbr<={max_vbr}]+bestaudio[acodec=aac]/best[ext=mp4]'
+            
             ydl_opts = {
-                # Format: Prefer 720p max, mp4 container, prioritize balanced quality/size
-                # Fallback chain: 720p+audio > 480p+audio > 360p+audio > best available
-                'format': 'best[ext=mp4][height<=720]/bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[height<=720]',
+                'format': format_str,
+                'remux_video': 'mp4',  # Stream copy to MP4 container (no re-encoding)
                 'quiet': False,
                 'no_warnings': False,
                 'socket_timeout': 30,
-                'playlist_items': '1',  # For quote tweets: take only first video (main tweet)
+                'playlist_items': '1',  # For quote tweets: take only first video
                 'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
                 'progress_hooks': [lambda d: asyncio.create_task(
                     update_download_progress(status_msg, d)
                 )],
-                # Additional optimizations for smaller downloads
                 'prefer_free_formats': True,  # Prefer formats without premium/restricted access
             }
             
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    # Download with primary URL (yt-dlp handles Twitter/X natively)
+                    # Download with optimized format selection (no post-processing needed)
                     info = ydl.extract_info(download_url, download=True)
                     filename = ydl.prepare_filename(info)
                     return filename
@@ -501,25 +534,28 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 # If primary download fails (e.g., age-restricted content), try fallback
                 logger.warning(f"Primary download attempt failed: {e}. Retrying with fallback options...")
                 
-                # Fallback: Try with different yt-dlp approach (remove some constraints)
+                # Fallback: Try with different yt-dlp approach (remove bitrate/codec restrictions)
                 fallback_opts = ydl_opts.copy()
                 fallback_opts['quiet'] = True
-                fallback_opts['format'] = 'best'  # Less restrictive format selection
+                fallback_opts['format'] = 'best[ext=mp4]/best'  # Less restrictive format selection
                 
                 try:
                     with yt_dlp.YoutubeDL(fallback_opts) as ydl:
                         info = ydl.extract_info(download_url, download=True)
                         filename = ydl.prepare_filename(info)
-                        logger.info(f"Fallback download successful for user")
+                        logger.info(f"Fallback download successful")
                         return filename
                 except Exception as fallback_error:
                     # Both attempts failed
                     logger.error(f"Fallback download also failed: {fallback_error}")
                     raise
         
+        # Get video duration first
+        duration_seconds = await asyncio.wait_for(_get_duration(), timeout=60)
+        
         # Apply timeout to download operation
         try:
-            filename = await asyncio.wait_for(_download(), timeout=timeout)
+            filename = await asyncio.wait_for(_download(duration_seconds), timeout=timeout)
         except asyncio.TimeoutError:
             logger.error(f"Download timeout after {timeout}s for user")
             raise ValueError(f"Download took too long (timeout: {timeout}s)")
@@ -533,7 +569,7 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
             logger.error(f"Downloaded file not found: {filename}")
             raise ValueError("Downloaded file not found")
         
-        # Sanitize the filename for HandBrake compatibility
+        # Sanitize the filename for compatibility
         dir_path = os.path.dirname(filename)
         file_basename = os.path.basename(filename)
         name_without_ext = os.path.splitext(file_basename)[0]
@@ -1010,87 +1046,45 @@ async def handle_encoding_choice(user_id: int, message: types.Message, state: FS
             await state.clear()
             return
         
-        # Send status message
-        try:
-            status_msg = await message.answer("⚙️ Encoding started...\n_Processing video, please wait_")
-        except Exception as e:
-            logger.error(f"Failed to send encoding status to user {user_id}: {e}")
-            return
+        # The downloaded file is already optimized with yt-dlp native format selection + stream copy
+        # No re-encoding needed - file downloaded with dynamic resolution/bitrate limiting
+        output_file = downloaded_file
         
-        if download_states:
-            await state.set_state(download_states.encoding.state)
-            logger.info(f"FSM state set to encoding for user {user_id}")
-        
-        # Get preset
-        try:
-            preset = await db.get_user_setting(user_id, 'encoding_preset') or config.HANDBRAKE_PRESET
-        except Exception as e:
-            logger.error(f"Failed to get preset for user {user_id}: {e}")
-            preset = config.HANDBRAKE_PRESET
-        
-        # Get quality setting for chosen resolution
-        quality_setting = QUALITY_SETTINGS.get(chosen_quality, {}).get('quality', '24')
-        
-        # Encode with appropriate quality
-        output_file = os.path.join(temp_dir, "encoded.mp4")
-        logger.info(f"Starting {chosen_quality} encoding for user {user_id} with quality={quality_setting}")
-        
-        success = await encode_with_handbrake(downloaded_file, output_file, preset, status_msg, quality=quality_setting)
-        
-        if not success:
-            try:
-                await status_msg.edit_text(
-                    f"❌ *Encoding Failed*\n\n"
-                    f"The video encoding process encountered an error.\n\n"
-                    f"💡 Try:\n"
-                    f"• A shorter video\n"
-                    f"• A faster preset (Settings → ⚙️)\n"
-                    f"• A different video",
-                    parse_mode="Markdown"
-                )
-            except Exception:
-                pass
-            logger.error(f"Encoding failed for user {user_id}")
-            await state.clear()
-            return
-        
-        # Check output file size
+        # Check file size
         try:
             output_size = os.path.getsize(output_file)
-            logger.info(f"Encoded {chosen_quality} file size: {output_size / (1024*1024):.1f}MB for user {user_id}")
+            logger.info(f"Optimized {chosen_quality} video ready: {output_size / (1024*1024):.1f}MB for user {user_id}")
         except Exception as e:
-            logger.error(f"Failed to get output file size for user {user_id}: {e}")
+            logger.error(f"Failed to get file size for user {user_id}: {e}")
             try:
-                await status_msg.edit_text("❌ Error checking encoded file size.")
+                await message.answer("❌ Error checking video file size.")
             except Exception:
                 pass
             await state.clear()
             return
         
-        # Check if file is too large (allow slight overage, ~55MB instead of 50MB)
+        # Check if file is too large
         MAX_SIZE_WITH_TOLERANCE = int(config.MAX_FILE_SIZE * 1.1)  # 10% tolerance (55MB)
         if output_size > MAX_SIZE_WITH_TOLERANCE:
             try:
-                await status_msg.edit_text(
-                    f"❌ *Encoded File Too Large*\n\n"
-                    f"📏 Result: {output_size / (1024*1024):.1f}MB (limit ~55MB)\n\n"
-                    f"💡 Try:\n"
-                    f"• A shorter video\n"
-                    f"• A faster preset (Settings → ⚙️)\n"
-                    f"• Lower resolution source",
+                await message.answer(
+                    f"❌ *Video Too Large*\n\n"
+                    f"📏 Size: {output_size / (1024*1024):.1f}MB (limit ~55MB)\n\n"
+                    f"💡 Try a shorter video or different source",
                     parse_mode="Markdown"
                 )
             except Exception:
                 pass
-            logger.error(f"Encoded file too large for user {user_id}: {output_size / (1024*1024):.1f}MB")
+            logger.error(f"Video file too large for user {user_id}: {output_size / (1024*1024):.1f}MB")
             await state.clear()
             return
         
-        # Uploading
+        # Send status message
         try:
-            await status_msg.edit_text("✅ Encoding done!\n📤 Uploading to Telegram...")
+            status_msg = await message.answer("✅ Video ready!\n📤 Uploading to Telegram...")
         except Exception as e:
-            logger.warning(f"Failed to update status for user {user_id}: {e}")
+            logger.error(f"Failed to send status message to user {user_id}: {e}")
+            return
         
         if download_states:
             await state.set_state(download_states.uploading.state)
