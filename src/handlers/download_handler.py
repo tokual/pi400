@@ -211,7 +211,7 @@ async def show_encoding_choices_keyboard(duration_seconds: int) -> tuple:
     return keyboard, available_estimates
 
 
-async def upload_original_and_ask_encoding(user_id: int, message: types.Message, state: FSMContext, original_file: str, duration_seconds: int) -> bool:
+async def upload_original_and_ask_encoding(user_id: int, message: types.Message, state: FSMContext, original_file: str, duration_seconds: int, temp_dir: str) -> bool:
     """Upload original video and show encoding choice keyboard.
     
     Args:
@@ -220,6 +220,7 @@ async def upload_original_and_ask_encoding(user_id: int, message: types.Message,
         state: FSM context
         original_file: Path to original video file
         duration_seconds: Video duration in seconds
+        temp_dir: Temporary directory path
     
     Returns:
         True if upload successful, False otherwise
@@ -480,12 +481,39 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 'progress_hooks': [lambda d: asyncio.create_task(
                     update_download_progress(status_msg, d)
                 )],
-                # For Twitter/X: skip quoted tweets and only get the main tweet
-                'extract_flat': False,
-                'playlistend': 1,  # Only download the first item (main tweet)
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # For Twitter/X URLs, we need to extract only the main tweet, not quoted/replied tweets
+                # Use skip_download=True first to get metadata and filter out playlists
+                if 'twitter.com' in url or 'x.com' in url:
+                    # Extract info without downloading to check if it's a playlist
+                    extract_opts = ydl_opts.copy()
+                    extract_opts['skip_download'] = True
+                    extract_opts['quiet'] = True
+                    
+                    with yt_dlp.YoutubeDL(extract_opts) as extract_ydl:
+                        info = extract_ydl.extract_info(url, download=False)
+                    
+                    # If it's a playlist, only take the first entry (main tweet)
+                    if info.get('_type') == 'playlist' and 'entries' in info:
+                        # Use only the first entry's ID
+                        main_video_id = info['entries'][0].get('id')
+                        if main_video_id:
+                            # Construct URL for just the main tweet
+                            if 'twitter.com' in url:
+                                url = f"https://twitter.com/i/web/status/{main_video_id}"
+                            else:
+                                url = f"https://x.com/i/web/status/{main_video_id}"
+                    elif isinstance(info, dict) and 'id' in info:
+                        # Single video, update URL with proper format
+                        video_id = info['id']
+                        if 'twitter.com' in url:
+                            url = f"https://twitter.com/i/web/status/{video_id}"
+                        else:
+                            url = f"https://x.com/i/web/status/{video_id}"
+                
+                # Now download with the filtered URL
                 info = ydl.extract_info(url, download=True)
                 filename = ydl.prepare_filename(info)
                 return filename
@@ -900,7 +928,7 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
                     pass
                 
                 # Upload original and show encoding choices
-                success = await upload_original_and_ask_encoding(user_id, message, state, downloaded_file, duration_seconds)
+                success = await upload_original_and_ask_encoding(user_id, message, state, downloaded_file, duration_seconds, temp_dir)
                 if success:
                     if download_states:
                         await state.set_state(download_states.waiting_for_encoding_choice.state)
