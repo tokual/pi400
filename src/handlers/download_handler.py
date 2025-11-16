@@ -660,13 +660,12 @@ async def execute_confirmed_download(message: types.Message, state: FSMContext, 
             logger.info(f"Uploading file for user {user_id}")
             
             try:
-                with open(output_file, 'rb') as video_file:
-                    video_msg = await message.bot.send_video(
-                        chat_id=user_id,
-                        video=video_file,
-                        caption="✅ Your video is ready!",
-                        parse_mode="Markdown"
-                    )
+                video_msg = await message.bot.send_video(
+                    chat_id=user_id,
+                    video=output_file,
+                    caption="✅ Your video is ready!",
+                    parse_mode="Markdown"
+                )
             except Exception as e:
                 logger.error(f"Upload failed for user {user_id}: {e}")
                 try:
