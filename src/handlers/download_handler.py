@@ -202,7 +202,7 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
         
         async def _download():
             ydl_opts = {
-                'format': 'best[ext=mp4][height<=1080]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+                'format': 'best[ext=mp4][height<=1080][vcodec!=none][acodec!=none]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[height<=1080]',
                 'quiet': False,
                 'no_warnings': False,
                 'socket_timeout': 30,
@@ -289,7 +289,7 @@ async def encode_with_handbrake(input_file: str, output_file: str, preset: str, 
             '-i', input_file,
             '-o', output_file,
             '--preset', preset,
-            '-q', '22',
+            '-q', '24',
             '-e', 'x264',
             '-b', '2000',
             '-a', '1',
@@ -733,13 +733,20 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
                     logger.error(f"Failed to send error message to user {user_id}: {edit_error}")
         
         finally:
-            # Cleanup temp directory
+            # Cleanup temp directory asynchronously to avoid blocking user response
             if temp_dir and os.path.exists(temp_dir):
-                try:
-                    shutil.rmtree(temp_dir)
-                    logger.info(f"Cleaned up temp directory: {temp_dir}")
-                except Exception as e:
-                    logger.error(f"Failed to cleanup temp directory {temp_dir}: {e}")
+                # Schedule cleanup as background task instead of blocking
+                def cleanup_temp():
+                    try:
+                        shutil.rmtree(temp_dir)
+                        logger.info(f"Cleaned up temp directory: {temp_dir}")
+                    except Exception as e:
+                        logger.error(f"Failed to cleanup temp directory {temp_dir}: {e}")
+                
+                # Run cleanup in background without blocking
+                import threading
+                cleanup_thread = threading.Thread(target=cleanup_temp, daemon=True)
+                cleanup_thread.start()
             
             # Clear FSM state
             try:
