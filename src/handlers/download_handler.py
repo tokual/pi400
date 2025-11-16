@@ -252,7 +252,7 @@ async def upload_original_and_ask_encoding(user_id: int, message: types.Message,
                     return await message.bot.send_video(
                         chat_id=user_id,
                         video=FSInputFile(original_file),
-                        caption=f"📹 *Original Video* ({file_size_mb:.1f}MB)\\n\\nChoose encoding quality below or skip.",
+                        caption=f"📹 *Original Video* ({file_size_mb:.1f}MB)\n\nChoose encoding quality below or skip.",
                         parse_mode="Markdown"
                     )
                 
@@ -482,7 +482,7 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 'quiet': False,
                 'no_warnings': False,
                 'socket_timeout': 30,
-                'noplaylist': True,
+                'playlist_items': '1',  # For quote tweets: take only first video (main tweet)
                 'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
                 'progress_hooks': [lambda d: asyncio.create_task(
                     update_download_progress(status_msg, d)
@@ -491,40 +491,31 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 'prefer_free_formats': True,  # Prefer formats without premium/restricted access
             }
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # For Twitter/X URLs, we need to extract only the main tweet, not quoted/replied tweets
-                # Use skip_download=True first to get metadata and filter out playlists
-                if 'twitter.com' in download_url or 'x.com' in download_url:
-                    # Extract info without downloading to check if it's a playlist
-                    extract_opts = ydl_opts.copy()
-                    extract_opts['skip_download'] = True
-                    extract_opts['quiet'] = True
-                    
-                    with yt_dlp.YoutubeDL(extract_opts) as extract_ydl:
-                        info = extract_ydl.extract_info(download_url, download=False)
-                    
-                    # If it's a playlist, only take the first entry (main tweet)
-                    if info.get('_type') == 'playlist' and 'entries' in info:
-                        # Use only the first entry's ID
-                        main_video_id = info['entries'][0].get('id')
-                        if main_video_id:
-                            # Construct URL for just the main tweet
-                            if 'twitter.com' in download_url:
-                                download_url = f"https://twitter.com/i/web/status/{main_video_id}"
-                            else:
-                                download_url = f"https://x.com/i/web/status/{main_video_id}"
-                    elif isinstance(info, dict) and 'id' in info:
-                        # Single video, update URL with proper format
-                        video_id = info['id']
-                        if 'twitter.com' in download_url:
-                            download_url = f"https://twitter.com/i/web/status/{video_id}"
-                        else:
-                            download_url = f"https://x.com/i/web/status/{video_id}"
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # Download with primary URL (yt-dlp handles Twitter/X natively)
+                    info = ydl.extract_info(download_url, download=True)
+                    filename = ydl.prepare_filename(info)
+                    return filename
+            except Exception as e:
+                # If primary download fails (e.g., age-restricted content), try fallback
+                logger.warning(f"Primary download attempt failed: {e}. Retrying with fallback options...")
                 
-                # Now download with the filtered URL
-                info = ydl.extract_info(download_url, download=True)
-                filename = ydl.prepare_filename(info)
-                return filename
+                # Fallback: Try with different yt-dlp approach (remove some constraints)
+                fallback_opts = ydl_opts.copy()
+                fallback_opts['quiet'] = True
+                fallback_opts['format'] = 'best'  # Less restrictive format selection
+                
+                try:
+                    with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                        info = ydl.extract_info(download_url, download=True)
+                        filename = ydl.prepare_filename(info)
+                        logger.info(f"Fallback download successful for user")
+                        return filename
+                except Exception as fallback_error:
+                    # Both attempts failed
+                    logger.error(f"Fallback download also failed: {fallback_error}")
+                    raise
         
         # Apply timeout to download operation
         try:
@@ -1135,7 +1126,9 @@ async def handle_encoding_choice(user_id: int, message: types.Message, state: FS
                         parse_mode="Markdown"
                     )
                 
+                logger.info(f"Starting upload attempt for {chosen_quality} file ({output_size / (1024*1024):.1f}MB)")
                 video_msg = await retry_with_backoff(upload_task, max_attempts=3, user_id=user_id)
+                logger.info(f"Successfully uploaded {chosen_quality} video for user {user_id}")
         except Exception as e:
             logger.error(f"Upload failed for user {user_id}: {e}")
             try:
