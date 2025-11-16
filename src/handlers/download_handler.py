@@ -223,39 +223,39 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
         except asyncio.TimeoutError:
             logger.error(f"Download timeout after {timeout}s for user")
             raise ValueError(f"Download took too long (timeout: {timeout}s)")
-            
-            # Validate downloaded file
-            if not filename or not isinstance(filename, str):
-                logger.error("Invalid filename from yt-dlp")
-                raise ValueError("Failed to get filename")
-            
-            if not os.path.exists(filename):
-                logger.error(f"Downloaded file not found: {filename}")
-                raise ValueError("Downloaded file not found")
-            
-            # Sanitize the filename for HandBrake compatibility
-            dir_path = os.path.dirname(filename)
-            file_basename = os.path.basename(filename)
-            name_without_ext = os.path.splitext(file_basename)[0]
-            ext = os.path.splitext(file_basename)[1]
-            
-            sanitized_name = sanitize_filename(name_without_ext) + ext
-            sanitized_path = os.path.join(dir_path, sanitized_name)
-            
-            # Verify the path is within temp_dir (prevent directory traversal)
-            real_temp = os.path.realpath(temp_dir)
-            real_sanitized = os.path.realpath(sanitized_path)
-            
-            if not real_sanitized.startswith(real_temp):
-                logger.error(f"Path traversal detected: {sanitized_path}")
-                raise ValueError("Invalid file path")
-            
-            # Rename the file if necessary
-            if filename != sanitized_path:
-                os.rename(filename, sanitized_path)
-                logger.info(f"Renamed: {file_basename} -> {sanitized_name}")
-            
-            return sanitized_path
+        
+        # Validate downloaded file
+        if not filename or not isinstance(filename, str):
+            logger.error("Invalid filename from yt-dlp")
+            raise ValueError("Failed to get filename")
+        
+        if not os.path.exists(filename):
+            logger.error(f"Downloaded file not found: {filename}")
+            raise ValueError("Downloaded file not found")
+        
+        # Sanitize the filename for HandBrake compatibility
+        dir_path = os.path.dirname(filename)
+        file_basename = os.path.basename(filename)
+        name_without_ext = os.path.splitext(file_basename)[0]
+        ext = os.path.splitext(file_basename)[1]
+        
+        sanitized_name = sanitize_filename(name_without_ext) + ext
+        sanitized_path = os.path.join(dir_path, sanitized_name)
+        
+        # Verify the path is within temp_dir (prevent directory traversal)
+        real_temp = os.path.realpath(temp_dir)
+        real_sanitized = os.path.realpath(sanitized_path)
+        
+        if not real_sanitized.startswith(real_temp):
+            logger.error(f"Path traversal detected: {sanitized_path}")
+            raise ValueError("Invalid file path")
+        
+        # Rename the file if necessary
+        if filename != sanitized_path:
+            os.rename(filename, sanitized_path)
+            logger.info(f"Renamed: {file_basename} -> {sanitized_name}")
+        
+        return sanitized_path
     except Exception as e:
         logger.error(f"Download error: {str(e)}")
         raise
