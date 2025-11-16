@@ -69,11 +69,11 @@ pip install -q --upgrade pip setuptools wheel
 
 # Install Python dependencies
 echo -e "${YELLOW}Installing Python dependencies...${NC}"
-pip install -q \
-    aiogram==3.10.0 \
-    aiosqlite==0.19.0 \
-    yt-dlp==2024.10.22 \
-    python-dotenv==1.0.0
+pip install -q --upgrade \
+    aiogram>=3.10.0 \
+    aiosqlite>=0.19.0 \
+    yt-dlp>=2024.10.22 \
+    python-dotenv>=1.0.0
 echo -e "${GREEN}✓ Python dependencies installed${NC}"
 
 # Create .env file if it doesn't exist
@@ -125,7 +125,7 @@ User=$BOT_USER
 Group=$BOT_GROUP
 WorkingDirectory=$BOT_DIR
 EnvironmentFile=$BOT_DIR/.env
-ExecStart=$BOT_DIR/venv/bin/python3 -m src.bot
+ExecStart=$BOT_DIR/startup.sh
 Restart=on-failure
 RestartSec=10s
 StandardOutput=journal
@@ -142,6 +142,7 @@ echo -e "${YELLOW}Setting permissions...${NC}"
 chown -R "$BOT_USER:$BOT_GROUP" "$BOT_DIR"
 chown root:root "/etc/systemd/system/$SYSTEMD_SERVICE"
 chmod 644 "/etc/systemd/system/$SYSTEMD_SERVICE"
+chmod 755 "$BOT_DIR/startup.sh"
 echo -e "${GREEN}✓ Permissions set${NC}"
 
 # Reload systemd and enable service
