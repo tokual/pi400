@@ -12,7 +12,7 @@ import yt_dlp
 
 from aiogram import types
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 
 from src.database import Database
 from src.utils import logger
@@ -662,7 +662,7 @@ async def execute_confirmed_download(message: types.Message, state: FSMContext, 
             try:
                 video_msg = await message.bot.send_video(
                     chat_id=user_id,
-                    video=output_file,
+                    video=InputFile(output_file),
                     caption="✅ Your video is ready!",
                     parse_mode="Markdown"
                 )
