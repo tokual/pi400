@@ -265,23 +265,18 @@ async def update_download_progress(message: types.Message, data: dict):
     """Update message with download progress."""
     try:
         if data['status'] == 'downloading':
-            percent = data.get('_percent_str', 'N/A').strip()
-            speed = data.get('_speed_str', 'N/A').strip()
-            eta = data.get('_eta_str', 'N/A').strip()
-            
-            progress_text = f"⬇️ Downloading...\n{percent} | Speed: {speed} | ETA: {eta}"
-            
-            # Update every 5 seconds to avoid rate limits
-            if not hasattr(update_download_progress, '_last_update'):
-                update_download_progress._last_update = 0
-            
-            import time
-            if time.time() - update_download_progress._last_update > 5:
+            # Only show size estimate once to reduce message updates
+            if data.get('_total_bytes_estimate') and not hasattr(update_download_progress, '_size_shown'):
+                total_mb = data['_total_bytes_estimate'] / (1024 * 1024)
                 try:
-                    await message.edit_text(progress_text)
-                    update_download_progress._last_update = time.time()
+                    await message.edit_text(f"⬇️ Downloading video...\n({total_mb:.0f}MB estimated)")
+                    update_download_progress._size_shown = True
                 except Exception:
                     pass
+        elif data['status'] == 'finished':
+            # Clear flag for next download
+            if hasattr(update_download_progress, '_size_shown'):
+                delattr(update_download_progress, '_size_shown')
     except Exception as e:
         logger.debug(f"Progress update error: {str(e)}")
 
@@ -593,7 +588,7 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
             
             # Encode video
             try:
-                await status_msg.edit_text("⚙️ Encoding video...\n_This may take 1-10 minutes depending on length_")
+                await status_msg.edit_text("⚙️ Encoding started...\n_Processing video, please wait_")
             except Exception as e:
                 logger.warning(f"Failed to update status for user {user_id}: {e}")
             
@@ -655,9 +650,9 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
                 logger.error(f"Encoded file too large for user {user_id}: {output_size / (1024*1024):.1f}MB")
                 return
             
-            # Upload to Telegram
+            # Encoding complete, now uploading
             try:
-                await status_msg.edit_text("📤 Uploading to Telegram...\n_Almost done!_")
+                await status_msg.edit_text("✅ Encoding done!\n📤 Uploading to Telegram...")
             except Exception as e:
                 logger.warning(f"Failed to update status for user {user_id}: {e}")
             
@@ -714,8 +709,8 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
             
             try:
                 await message.answer(
-                    "✅ *Done!*\n\n"
-                    "Your video has been sent above.\n\n"
+                    "✅ *Video Ready!*\n\n"
+                    "Your video has been uploaded above.\n\n"
                     "What would you like to do next?",
                     reply_markup=keyboard
                 )
