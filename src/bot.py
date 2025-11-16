@@ -182,6 +182,19 @@ async def url_message_handler(message: types.Message, state: FSMContext, db: Dat
     current_state = await state.get_state()
     url = message.text
     
+    # Validate URL input
+    if not url or not isinstance(url, str):
+        await message.answer("❌ Invalid input")
+        return
+    
+    # Limit URL length (max 2048 chars is reasonable for URLs)
+    if len(url) > 2048:
+        await message.answer("❌ URL is too long (max 2048 characters)")
+        return
+    
+    # Strip whitespace
+    url = url.strip()
+    
     # Check if we're in waiting_for_url state or if user just sent a URL
     if current_state == DownloadStates.waiting_for_url.state or url.startswith(('http://', 'https://')):
         logger.info(f"User {user_id} submitted URL: {url[:50]}...")
@@ -209,11 +222,23 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
         await callback_query.answer("❌ Unauthorized", show_alert=True)
         return
     
+    # Validate callback data
+    if not callback_query.data or not isinstance(callback_query.data, str):
+        await callback_query.answer("❌ Invalid request", show_alert=True)
+        return
+    
     data = await state.get_data()
     pending_url = data.get('pending_url')
     
-    if not pending_url:
+    # Validate pending URL exists
+    if not pending_url or not isinstance(pending_url, str):
         await callback_query.answer("❌ No pending download", show_alert=True)
+        await state.clear()
+        return
+    
+    # Validate URL length
+    if len(pending_url) > 2048:
+        await callback_query.answer("❌ URL is invalid", show_alert=True)
         await state.clear()
         return
     
@@ -247,6 +272,7 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
         
         await state.clear()
     else:
+        # Invalid callback data
         await callback_query.answer("❓ Please choose Yes or No", show_alert=True)
 
 

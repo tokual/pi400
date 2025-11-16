@@ -64,10 +64,23 @@ async def show_settings_menu(callback_query: types.CallbackQuery, state: FSMCont
 async def preset_selection_handler(callback_query: types.CallbackQuery, state: FSMContext, db: Database):
     """Handle preset selection."""
     user_id = callback_query.from_user.id
-    preset = callback_query.data.replace("preset_", "")
     
-    # Validate preset
+    # Validate callback data
+    if not callback_query.data or not isinstance(callback_query.data, str):
+        await callback_query.answer("❌ Invalid request", show_alert=True)
+        return
+    
+    # Extract and validate preset name
+    preset = callback_query.data.replace("preset_", "").strip()
+    
+    # Limit preset name length (reasonable max is 50 chars)
+    if len(preset) > 50:
+        await callback_query.answer("❌ Invalid preset", show_alert=True)
+        return
+    
+    # Validate preset against whitelist
     if preset not in ENCODING_PRESETS.values():
+        logger.warning(f"User {user_id} attempted to set invalid preset: {preset}")
         await callback_query.answer("❌ Invalid preset", show_alert=True)
         return
     

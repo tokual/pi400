@@ -25,14 +25,36 @@ SUPPORTED_DOMAINS = [
 
 
 def validate_url(url: str) -> bool:
-    """Validate if URL is from a supported platform."""
+    """Validate if URL is from a supported platform.
+    
+    Performs both format validation and basic security checks.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    
+    # Limit URL length (max 2048 is standard)
+    if len(url) > 2048:
+        return False
+    
     try:
         parsed = urlparse(url)
         domain = parsed.netloc.lower().replace('www.', '')
         
+        # Validate scheme is http/https
+        if parsed.scheme not in ['http', 'https']:
+            return False
+        
+        # Validate netloc exists and is not suspicious
+        if not parsed.netloc or len(parsed.netloc) > 255:
+            return False
+        
+        # Prevent file:// URIs and other schemes
+        if parsed.scheme.lower() not in ['http', 'https']:
+            return False
+        
         # Allow any domain for yt-dlp (1000+ supported)
         # Just basic URL validation
-        return parsed.scheme in ['http', 'https'] and parsed.netloc
+        return True
     except Exception:
         return False
 
@@ -140,8 +162,26 @@ def sanitize_filename(filename: str) -> str:
 
 
 async def download_video(url: str, temp_dir: str, status_msg: types.Message) -> Optional[str]:
-    """Download video using yt-dlp."""
+    """Download video using yt-dlp.
+    
+    Args:
+        url: Video URL (must be validated before calling)
+        temp_dir: Temporary directory (must exist)
+        status_msg: Message to update with progress
+    
+    Returns:
+        Path to downloaded file or None on error
+    """
     try:
+        # Validate temp_dir
+        if not temp_dir or not isinstance(temp_dir, str):
+            logger.error("Invalid temp_dir")
+            raise ValueError("Invalid temporary directory")
+        
+        if not os.path.isdir(temp_dir):
+            logger.error(f"Temp directory does not exist: {temp_dir}")
+            raise ValueError("Temporary directory not found")
+        
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
             'quiet': False,
@@ -157,6 +197,15 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message) -> 
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
             
+            # Validate downloaded file
+            if not filename or not isinstance(filename, str):
+                logger.error("Invalid filename from yt-dlp")
+                raise ValueError("Failed to get filename")
+            
+            if not os.path.exists(filename):
+                logger.error(f"Downloaded file not found: {filename}")
+                raise ValueError("Downloaded file not found")
+            
             # Sanitize the filename for HandBrake compatibility
             dir_path = os.path.dirname(filename)
             file_basename = os.path.basename(filename)
@@ -165,6 +214,14 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message) -> 
             
             sanitized_name = sanitize_filename(name_without_ext) + ext
             sanitized_path = os.path.join(dir_path, sanitized_name)
+            
+            # Verify the path is within temp_dir (prevent directory traversal)
+            real_temp = os.path.realpath(temp_dir)
+            real_sanitized = os.path.realpath(sanitized_path)
+            
+            if not real_sanitized.startswith(real_temp):
+                logger.error(f"Path traversal detected: {sanitized_path}")
+                raise ValueError("Invalid file path")
             
             # Rename the file if necessary
             if filename != sanitized_path:
@@ -246,6 +303,17 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
     user_id = message.from_user.id
     status_msg = None
     temp_dir = None
+    
+    # Validate input parameters
+    if not url or not isinstance(url, str):
+        logger.warning(f"Invalid URL input from user {user_id}")
+        await message.answer("❌ Invalid URL")
+        return
+    
+    # Validate user_id
+    if not isinstance(user_id, int) or user_id < 0:
+        logger.warning(f"Invalid user_id: {user_id}")
+        return
     
     try:
         # Validate URL
