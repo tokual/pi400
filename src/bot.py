@@ -195,6 +195,15 @@ async def url_message_handler(message: types.Message, state: FSMContext, db: Dat
     # Strip whitespace
     url = url.strip()
     
+    # Validate FSM state - only allow URLs in waiting_for_url state or from menu
+    if current_state and current_state not in [DownloadStates.waiting_for_url.state, None]:
+        logger.warning(f"User {user_id} sent URL in wrong state: {current_state}")
+        try:
+            await message.answer("❌ Please use the menu buttons to start a download.")
+        except Exception as e:
+            logger.error(f"Failed to send state error to user {user_id}: {e}")
+        return
+    
     # Check if we're in waiting_for_url state or if user just sent a URL
     if current_state == DownloadStates.waiting_for_url.state or url.startswith(('http://', 'https://')):
         logger.info(f"User {user_id} submitted URL: {url[:50]}...")
@@ -222,59 +231,89 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
         await callback_query.answer("❌ Unauthorized", show_alert=True)
         return
     
+    # Validate FSM state before processing confirmation
+    current_state = await state.get_state()
+    if current_state != DownloadStates.waiting_for_confirmation.state:
+        logger.warning(f"User {user_id} sent confirmation callback in wrong state: {current_state}")
+        await callback_query.answer("❌ Invalid state. Please start over.", show_alert=True)
+        return
+    
     # Validate callback data
     if not callback_query.data or not isinstance(callback_query.data, str):
         await callback_query.answer("❌ Invalid request", show_alert=True)
         return
     
     # Retrieve pending URL from database (more reliable than FSM state)
-    pending_url = await db.get_user_setting(user_id, 'pending_url')
+    try:
+        pending_url = await db.get_user_setting(user_id, 'pending_url')
+    except Exception as e:
+        logger.error(f"Failed to get pending URL for user {user_id}: {e}")
+        await callback_query.answer("❌ Database error. Please try again.", show_alert=True)
+        await state.clear()
+        return
     
     # Validate pending URL exists
     if not pending_url or not isinstance(pending_url, str):
+        logger.warning(f"No pending URL for user {user_id}")
         await callback_query.answer("❌ No pending download", show_alert=True)
         await state.clear()
         return
     
     # Validate URL length
     if len(pending_url) > 2048:
+        logger.warning(f"Pending URL too long for user {user_id}")
         await callback_query.answer("❌ URL is invalid", show_alert=True)
-        await db.set_user_setting(user_id, 'pending_url', '')  # Clear pending URL
+        try:
+            await db.set_user_setting(user_id, 'pending_url', '')  # Clear pending URL
+        except Exception as e:
+            logger.error(f"Failed to clear pending URL for user {user_id}: {e}")
         await state.clear()
         return
     
     if callback_query.data == "confirm_yes":
         # User confirmed, proceed with download
+        logger.info(f"User {user_id} confirmed download")
         await callback_query.answer("✅ Starting download...")
         
         # Get message object from callback
         message = callback_query.message
         
         # Update the message to show download is starting
-        await message.edit_text("⏳ Processing your video...", reply_markup=None)
+        try:
+            await message.edit_text("⏳ Processing your video...", reply_markup=None)
+        except Exception as e:
+            logger.warning(f"Failed to edit confirmation message for user {user_id}: {e}")
         
         # Clear pending URL from database before processing
-        await db.set_user_setting(user_id, 'pending_url', '')
+        try:
+            await db.set_user_setting(user_id, 'pending_url', '')
+        except Exception as e:
+            logger.error(f"Failed to clear pending URL for user {user_id}: {e}")
         
-        # Process the download
-        await download_handler.process_download(message, state, db, pending_url, BotConfig, DownloadStates)
+        # Process the download (skip file size re-check)
+        await download_handler.execute_confirmed_download(message, state, db, pending_url, BotConfig, DownloadStates)
     
     elif callback_query.data == "confirm_no":
         # User declined
+        logger.info(f"User {user_id} declined download")
         await callback_query.answer("❌ Download cancelled")
         
         # Clear pending URL from database
-        await db.set_user_setting(user_id, 'pending_url', '')
+        try:
+            await db.set_user_setting(user_id, 'pending_url', '')
+        except Exception as e:
+            logger.error(f"Failed to clear pending URL for user {user_id}: {e}")
         
         # Delete the confirmation message
         try:
             await callback_query.message.delete()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to delete confirmation message for user {user_id}: {e}")
         
         await state.clear()
     else:
         # Invalid callback data
+        logger.warning(f"Invalid callback data from user {user_id}: {callback_query.data}")
         await callback_query.answer("❓ Please choose Yes or No", show_alert=True)
 
 
