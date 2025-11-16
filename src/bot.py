@@ -9,7 +9,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiohttp import TCPConnector, ClientSession
 
 from src.database import Database
 from src.utils import logger, get_user_setting, set_user_setting
@@ -480,15 +479,9 @@ async def main():
     # Add authorized user to whitelist if not exists
     await db.add_user(BotConfig.ALLOWED_USER_ID, is_whitelisted=True)
     
-    # Initialize bot with optimized aiohttp session for reliable uploads
-    # Configure TCPConnector with proper connection pooling
-    connector = TCPConnector(
-        limit=100,  # Limit total connections
-        limit_per_host=5,  # Limit connections per host
-        ttl_dns_cache=300,  # Cache DNS for 5 minutes
-    )
-    session = ClientSession(connector=connector)
-    bot = Bot(token=BotConfig.BOT_TOKEN, session=session)
+    # Initialize bot with default session
+    # Note: Connection pooling and timeouts are handled by aiogram internally
+    bot = Bot(token=BotConfig.BOT_TOKEN)
     dp = Dispatcher()
     
     # Register handlers
