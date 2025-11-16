@@ -12,7 +12,7 @@ import yt_dlp
 
 from aiogram import types
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 from src.database import Database
 from src.utils import logger
@@ -659,10 +659,23 @@ async def execute_confirmed_download(message: types.Message, state: FSMContext, 
             
             logger.info(f"Uploading file for user {user_id}")
             
+            # Defensive check: ensure output file exists before upload
+            if not os.path.exists(output_file):
+                logger.error(f"Output file does not exist: {output_file}")
+                try:
+                    await status_msg.edit_text(
+                        f"❌ *File Error*\n\n"
+                        f"The encoded video file was not found.\n\n"
+                        f"Please try again or contact support."
+                    )
+                except Exception:
+                    pass
+                return
+            
             try:
                 video_msg = await message.bot.send_video(
                     chat_id=user_id,
-                    video=InputFile(output_file),
+                    video=FSInputFile(output_file),
                     caption="✅ Your video is ready!",
                     parse_mode="Markdown"
                 )
