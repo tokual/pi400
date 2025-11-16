@@ -24,11 +24,12 @@ cat << 'EOF'
    - Debian-based OS (Raspberry Pi OS)
    - Internet connection
 
-📋 STEP 2: COPY PROJECT TO PI
+📋 STEP 2: CLONE PROJECT ON PI
 ═══════════════════════════════════════════════════════════════════════════
 
-On your computer:
-    $ scp -r /tmp/video-bot pi@192.168.1.100:/home/pi/
+On Raspberry Pi:
+    $ ssh pi@192.168.1.100
+    $ git clone https://github.com/tokual/pi400.git ~/pi400
 
 Replace 192.168.1.100 with your Raspberry Pi's IP address.
 
@@ -36,8 +37,7 @@ Replace 192.168.1.100 with your Raspberry Pi's IP address.
 ═══════════════════════════════════════════════════════════════════════════
 
 On Raspberry Pi:
-    $ ssh pi@192.168.1.100
-    $ cd ~/video-bot
+    $ cd ~/pi400
     $ sudo ./install.sh
 
 When prompted:
@@ -180,6 +180,6 @@ Check systemd status:
 
 ════════════════════════════════════════════════════════════════════════════════
 
-For more details, read: /tmp/video-bot/README.md
+For more details, read: ~/pi400/README.md
 
 EOF
