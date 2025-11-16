@@ -70,7 +70,7 @@ pip install -q --upgrade pip setuptools wheel
 # Install Python dependencies
 echo -e "${YELLOW}Installing Python dependencies...${NC}"
 pip install -q \
-    aiogram==3.0.0 \
+    aiogram==3.10.0 \
     aiosqlite==0.19.0 \
     yt-dlp==2024.10.22 \
     python-dotenv==1.0.0
