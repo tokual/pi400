@@ -362,7 +362,7 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
         
         async def _download():
             ydl_opts = {
-                'format': 'best[ext=mp4][height<=1080][vcodec!=none][acodec!=none]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[height<=1080]',
+                'format': 'best[ext=mp4][height<=1080]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[height<=1080]',
                 'quiet': False,
                 'no_warnings': False,
                 'socket_timeout': 30,
@@ -398,6 +398,10 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
         file_basename = os.path.basename(filename)
         name_without_ext = os.path.splitext(file_basename)[0]
         ext = os.path.splitext(file_basename)[1]
+        
+        # Fix missing or incorrect extension
+        if not ext or ext == '.NA':
+            ext = '.mp4'
         
         sanitized_name = sanitize_filename(name_without_ext) + ext
         sanitized_path = os.path.join(dir_path, sanitized_name)
