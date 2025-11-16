@@ -359,8 +359,8 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
             if estimated_encoded <= config.MAX_FILE_SIZE:
                 logger.info(f"Large file warning for user {user_id}: {file_size / (1024*1024):.0f}MB source, ~{estimated_encoded / (1024*1024):.0f}MB encoded")
                 
-                # Store URL for later use if confirmed
-                await state.update_data(pending_url=url, pending_message_id=status_msg.message_id)
+                # Store URL for later use if confirmed (store in database for persistence)
+                await db.set_user_setting(user_id, 'pending_url', url)
                 if download_states:
                     await state.set_state(download_states.waiting_for_confirmation.state)
                 else:

@@ -227,8 +227,8 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
         await callback_query.answer("❌ Invalid request", show_alert=True)
         return
     
-    data = await state.get_data()
-    pending_url = data.get('pending_url')
+    # Retrieve pending URL from database (more reliable than FSM state)
+    pending_url = await db.get_user_setting(user_id, 'pending_url')
     
     # Validate pending URL exists
     if not pending_url or not isinstance(pending_url, str):
@@ -239,6 +239,7 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
     # Validate URL length
     if len(pending_url) > 2048:
         await callback_query.answer("❌ URL is invalid", show_alert=True)
+        await db.set_user_setting(user_id, 'pending_url', '')  # Clear pending URL
         await state.clear()
         return
     
@@ -246,16 +247,14 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
         # User confirmed, proceed with download
         await callback_query.answer("✅ Starting download...")
         
-        # Create a message object to pass to process_download
-        # We reuse the original message from the state
-        message_id = data.get('pending_message_id')
-        
-        # Call process_download with the pending URL
-        # Get a fresh message object from the callback
+        # Get message object from callback
         message = callback_query.message
         
         # Update the message to show download is starting
         await message.edit_text("⏳ Processing your video...", reply_markup=None)
+        
+        # Clear pending URL from database before processing
+        await db.set_user_setting(user_id, 'pending_url', '')
         
         # Process the download
         await download_handler.process_download(message, state, db, pending_url, BotConfig, DownloadStates)
@@ -263,6 +262,9 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
     elif callback_query.data == "confirm_no":
         # User declined
         await callback_query.answer("❌ Download cancelled")
+        
+        # Clear pending URL from database
+        await db.set_user_setting(user_id, 'pending_url', '')
         
         # Delete the confirmation message
         try:
