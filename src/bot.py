@@ -481,17 +481,13 @@ async def main():
     await db.add_user(BotConfig.ALLOWED_USER_ID, is_whitelisted=True)
     
     # Initialize bot with optimized aiohttp session for reliable uploads
-    # Configure TCPConnector with proper timeouts and connection pooling
+    # Configure TCPConnector with proper connection pooling
     connector = TCPConnector(
         limit=100,  # Limit total connections
         limit_per_host=5,  # Limit connections per host
-        ttl_dns_cache=300,
-        tcp_keepalive=True,  # Enable TCP keep-alive for long operations
+        ttl_dns_cache=300,  # Cache DNS for 5 minutes
     )
-    session = ClientSession(
-        connector=connector,
-        timeout=asyncio.TimeoutError if not hasattr(asyncio, 'TimeoutError') else None
-    )
+    session = ClientSession(connector=connector)
     bot = Bot(token=BotConfig.BOT_TOKEN, session=session)
     dp = Dispatcher()
     
