@@ -11,6 +11,7 @@ import yt_dlp
 
 from aiogram import types
 from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from src.database import Database
 from src.utils import logger
@@ -35,8 +36,12 @@ def validate_url(url: str) -> bool:
         return False
 
 
-async def get_file_size(url: str) -> Optional[int]:
-    """Extract file size from video metadata using yt-dlp."""
+async def get_file_size(url: str) -> Optional[tuple[int, int]]:
+    """Extract file size and duration from video metadata using yt-dlp.
+    
+    Returns:
+        Tuple of (file_size_bytes, duration_seconds) or (None, None)
+    """
     try:
         ydl_opts = {
             'quiet': True,
@@ -47,21 +52,49 @@ async def get_file_size(url: str) -> Optional[int]:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
-            # Try to get file size
+            # Get file size
             filesize = info.get('filesize') or info.get('filesize_approx')
-            if filesize:
-                return int(filesize)
+            if not filesize:
+                # Estimate from duration and bitrate
+                duration = info.get('duration', 0)
+                tbr = info.get('tbr', 0)
+                if duration and tbr:
+                    filesize = int(duration * tbr * 125)  # tbr is in kbit/s
             
-            # Estimate from duration and bitrate
+            # Get duration
             duration = info.get('duration', 0)
-            tbr = info.get('tbr', 0)
-            if duration and tbr:
-                return int(duration * tbr * 125)  # tbr is in kbit/s
             
-            return None
+            if filesize and duration:
+                return int(filesize), int(duration)
+            
+            return None, None
     except Exception as e:
         logger.error(f"Error getting file size: {str(e)}")
-        return None
+        return None, None
+
+
+def estimate_encoded_size(duration_seconds: int, preset: str) -> int:
+    """Estimate encoded file size based on preset and duration.
+    
+    Encoding presets produce different bitrates:
+    - Very Fast 720p30: ~1.5 Mbps (lower bitrate)
+    - Fast 720p30: ~2.0 Mbps (balanced)
+    - Fast 1080p30: ~3.0 Mbps (higher resolution)
+    - HQ 720p30 Surround: ~2.5 Mbps (includes audio overhead)
+    """
+    bitrate_map = {
+        'Very Fast 720p30': 1.5,  # Mbps
+        'Fast 720p30': 2.0,
+        'Fast 1080p30': 3.0,
+        'HQ 720p30 Surround': 2.5,
+    }
+    
+    # Get bitrate for preset (default to 2.0 if unknown)
+    mbps = bitrate_map.get(preset, 2.0)
+    
+    # Calculate: duration * bitrate + overhead for audio and metadata (~5%)
+    encoded_size = (duration_seconds * mbps * 1024 * 1024) / 8
+    return int(encoded_size * 1.05)  # Add 5% overhead
 
 
 async def download_video(url: str, temp_dir: str, status_msg: types.Message) -> Optional[str]:
@@ -151,7 +184,7 @@ async def encode_with_handbrake(input_file: str, output_file: str, preset: str, 
         return False
 
 
-async def process_download(message: types.Message, state: FSMContext, db: Database, url: str, config):
+async def process_download(message: types.Message, state: FSMContext, db: Database, url: str, config, download_states=None):
     """Main download processing function."""
     user_id = message.from_user.id
     status_msg = None
@@ -173,23 +206,72 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
         # Send status message
         status_msg = await message.answer("🔍 Validating URL and checking video info...")
         
-        # Get file size
+        # Get file size and duration
         logger.info(f"Checking file size for URL: {url[:50]}...")
         await status_msg.edit_text("📊 Analyzing video metadata...")
         
-        file_size = await get_file_size(url)
+        result = await get_file_size(url)
         
-        if file_size and file_size > config.MAX_FILE_SIZE:
+        if result is None:
             await status_msg.edit_text(
-                f"❌ *Video Too Large*\n\n"
-                f"📏 File size: {file_size / (1024*1024):.1f}MB\n"
-                f"📏 Max allowed: {config.MAX_FILE_SIZE / (1024*1024):.0f}MB\n\n"
-                f"💡 Try:\n"
-                f"• A shorter video\n"
-                f"• A lower quality preset in Settings"
+                "⚠️ *Could not determine video size*\n\n"
+                "Proceeding with caution. The encoded file may be large.\n\n"
+                "If it fails, try a shorter video or faster preset."
             )
-            logger.warning(f"User {user_id} attempted to download {file_size / (1024*1024):.1f}MB file")
-            return
+            logger.warning(f"Could not get file size for user {user_id}")
+        elif result[0] > config.MAX_FILE_SIZE:  # file_size > 50MB
+            file_size, duration = result
+            
+            # Get current preset to estimate encoded size
+            preset = await db.get_user_setting(user_id, 'encoding_preset') or config.HANDBRAKE_PRESET
+            estimated_encoded = estimate_encoded_size(duration or 0, preset)
+            
+            # If estimated encoded size is below limit, show warning with confirmation
+            if estimated_encoded <= config.MAX_FILE_SIZE:
+                logger.info(f"Large file warning for user {user_id}: {file_size / (1024*1024):.0f}MB source, ~{estimated_encoded / (1024*1024):.0f}MB encoded")
+                
+                # Store URL for later use if confirmed
+                await state.update_data(pending_url=url, pending_message_id=status_msg.message_id)
+                if download_states:
+                    await state.set_state(download_states.waiting_for_confirmation.state)
+                else:
+                    # Use string state name if DownloadStates not provided
+                    await state.set_state("DownloadStates:waiting_for_confirmation")
+                
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ Yes, Continue", callback_data="confirm_yes"),
+                        InlineKeyboardButton(text="❌ No, Cancel", callback_data="confirm_no"),
+                    ]
+                ])
+                
+                await status_msg.edit_text(
+                    f"⚠️ *Large Source File*\n\n"
+                    f"📏 Source: {file_size / (1024*1024):.0f}MB\n"
+                    f"📏 Estimated after encoding: ~{estimated_encoded / (1024*1024):.0f}MB\n"
+                    f"📏 Telegram limit: 50MB\n\n"
+                    f"Using preset: *{preset}*\n\n"
+                    f"The source is large, but encoding should fit within limits.\n\n"
+                    f"Continue with download?",
+                    reply_markup=keyboard
+                )
+                return
+            else:
+                # Estimated size still too large
+                await status_msg.edit_text(
+                    f"❌ *Video Likely Too Large*\n\n"
+                    f"📏 Source: {file_size / (1024*1024):.0f}MB\n"
+                    f"📏 Estimated after encoding: ~{estimated_encoded / (1024*1024):.0f}MB\n"
+                    f"📏 Telegram limit: 50MB\n\n"
+                    f"Using preset: *{preset}*\n\n"
+                    f"💡 Try:\n"
+                    f"• A shorter video\n"
+                    f"• Very Fast preset (Settings → ⚙️)\n"
+                    f"• A different video"
+                )
+                logger.warning(f"User {user_id} file too large even after encoding: {estimated_encoded / (1024*1024):.0f}MB")
+                await state.clear()
+                return
         
         # Create temp directory
         temp_dir = tempfile.mkdtemp(prefix=f"video_{user_id}_")
@@ -254,14 +336,31 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
         logger.info(f"Uploading file for user {user_id}")
         
         with open(output_file, 'rb') as video_file:
-            await message.bot.send_video(
+            video_msg = await message.bot.send_video(
                 chat_id=user_id,
                 video=video_file,
                 caption="✅ Your video is ready!",
                 parse_mode="Markdown"
             )
         
-        await status_msg.edit_text("✅ Done! Your video has been sent above.\n\nUse /start to download another video.")
+        # Delete the status message and send completion message
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass  # Message may already be deleted
+        
+        # Send completion with options
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬇️ Download Another", callback_data="start_download")],
+            [InlineKeyboardButton(text="⚙️ Settings", callback_data="show_settings")],
+        ])
+        
+        await message.answer(
+            "✅ *Done!*\n\n"
+            "Your video has been sent above.\n\n"
+            "What would you like to do next?",
+            reply_markup=keyboard
+        )
         logger.info(f"Successfully processed video for user {user_id}")
         
     except Exception as e:

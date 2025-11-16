@@ -30,6 +30,7 @@ class BotConfig:
 class DownloadStates(StatesGroup):
     """FSM states for download flow."""
     waiting_for_url = State()
+    waiting_for_confirmation = State()
     downloading = State()
     encoding = State()
     uploading = State()
@@ -186,7 +187,7 @@ async def url_message_handler(message: types.Message, state: FSMContext, db: Dat
         logger.info(f"User {user_id} submitted URL: {url[:50]}...")
         
         # Call download handler
-        await download_handler.process_download(message, state, db, url, BotConfig)
+        await download_handler.process_download(message, state, db, url, BotConfig, DownloadStates)
 
 
 async def show_settings_handler(callback_query: types.CallbackQuery, state: FSMContext, db: Database):
@@ -198,6 +199,55 @@ async def show_settings_handler(callback_query: types.CallbackQuery, state: FSMC
         return
     
     await settings_handler.show_settings_menu(callback_query, state, db)
+
+
+async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMContext, db: Database):
+    """Handle file size confirmation."""
+    user_id = callback_query.from_user.id
+    
+    if not await check_authorization(user_id, db):
+        await callback_query.answer("❌ Unauthorized", show_alert=True)
+        return
+    
+    data = await state.get_data()
+    pending_url = data.get('pending_url')
+    
+    if not pending_url:
+        await callback_query.answer("❌ No pending download", show_alert=True)
+        await state.clear()
+        return
+    
+    if callback_query.data == "confirm_yes":
+        # User confirmed, proceed with download
+        await callback_query.answer("✅ Starting download...")
+        
+        # Create a message object to pass to process_download
+        # We reuse the original message from the state
+        message_id = data.get('pending_message_id')
+        
+        # Call process_download with the pending URL
+        # Get a fresh message object from the callback
+        message = callback_query.message
+        
+        # Update the message to show download is starting
+        await message.edit_text("⏳ Processing your video...", reply_markup=None)
+        
+        # Process the download
+        await download_handler.process_download(message, state, db, pending_url, BotConfig, DownloadStates)
+    
+    elif callback_query.data == "confirm_no":
+        # User declined
+        await callback_query.answer("❌ Download cancelled")
+        
+        # Delete the confirmation message
+        try:
+            await callback_query.message.delete()
+        except Exception:
+            pass
+        
+        await state.clear()
+    else:
+        await callback_query.answer("❓ Please choose Yes or No", show_alert=True)
 
 
 async def setup_handlers(dp: Dispatcher, db: Database):
@@ -219,6 +269,9 @@ async def setup_handlers(dp: Dispatcher, db: Database):
     async def show_settings_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
         return await show_settings_handler(callback_query, state, db)
     
+    async def confirmation_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
+        return await confirmation_handler(callback_query, state, db)
+    
     async def url_message_wrapper(message: types.Message, state: FSMContext):
         return await url_message_handler(message, state, db)
     
@@ -230,6 +283,7 @@ async def setup_handlers(dp: Dispatcher, db: Database):
     dp.callback_query.register(back_to_menu_wrapper, F.data == "back_to_menu")
     dp.callback_query.register(start_download_wrapper, F.data == "start_download")
     dp.callback_query.register(show_settings_wrapper, F.data == "show_settings")
+    dp.callback_query.register(confirmation_wrapper, F.data.in_(["confirm_yes", "confirm_no"]))
     
     # Message handlers for URL input (must be last to not interfere with other handlers)
     dp.message.register(url_message_wrapper)
