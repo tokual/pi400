@@ -725,52 +725,17 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
             
             estimated_encoded = estimate_encoded_size(duration or 0, preset)
             
-            # If estimated encoded size is below limit, show warning with confirmation
+            # If estimated encoded size is below limit, skip confirmation and proceed directly to download
             if estimated_encoded <= config.MAX_FILE_SIZE:
-                logger.info(f"Large file warning for user {user_id}: {file_size / (1024*1024):.0f}MB source, ~{estimated_encoded / (1024*1024):.0f}MB encoded")
-                
-                # Store URL for later use if confirmed (store in database for persistence)
-                try:
-                    await db.set_user_setting(user_id, 'pending_url', url)
-                except Exception as e:
-                    logger.error(f"Failed to store pending URL for user {user_id}: {e}")
-                    try:
-                        await status_msg.edit_text("❌ Database error. Please try again.")
-                    except Exception:
-                        pass
-                    return
-                
-                if download_states:
-                    await state.set_state(download_states.waiting_for_confirmation.state)
-                    logger.info(f"FSM state set to waiting_for_confirmation for user {user_id}")
-                else:
-                    # Use string state name if DownloadStates not provided
-                    await state.set_state("DownloadStates:waiting_for_confirmation")
-                
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="✅ Yes, Continue", callback_data="confirm_yes"),
-                        InlineKeyboardButton(text="❌ No, Cancel", callback_data="confirm_no"),
-                    ]
-                ])
+                logger.info(f"Large file (source {file_size / (1024*1024):.0f}MB, estimated {estimated_encoded / (1024*1024):.0f}MB encoded) for user {user_id}: proceeding directly to download")
                 
                 try:
-                    await status_msg.edit_text(
-                        f"⚠️ *Large Source File*\n\n"
-                        f"📏 Source: {file_size / (1024*1024):.0f}MB\n"
-                        f"📏 Estimated after encoding: ~{estimated_encoded / (1024*1024):.0f}MB\n"
-                        f"📏 Telegram limit: 50MB\n\n"
-                        f"Using preset: *{preset}*\n\n"
-                        f"The source is large, but encoding should fit within limits.\n\n"
-                        f"Continue with download?",
-                        reply_markup=keyboard,
-                        parse_mode="Markdown"
-                    )
+                    await status_msg.edit_text("✅ File size acceptable after encoding.\n\n⬇️ Starting download...")
                 except Exception as e:
-                    logger.error(f"Failed to show confirmation for user {user_id}: {e}")
-                logger.info(f"Confirmation dialog shown to user {user_id}")
-                waiting_for_confirmation = True
-                return
+                    logger.warning(f"Failed to update status for user {user_id}: {e}")
+                
+                # Proceed directly with download (will ask for quality afterward)
+                await execute_confirmed_download(user_id, message, state, db, url, config, download_states)
             else:
                 # Estimated size still too large
                 try:
