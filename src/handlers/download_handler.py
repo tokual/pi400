@@ -472,6 +472,9 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
             raise ValueError("Temporary directory not found")
         
         async def _download():
+            # Local variable to avoid Python 3.13 scoping issues with nested async functions
+            download_url = url
+            
             ydl_opts = {
                 # Format: Prefer 720p max, mp4 container, prioritize balanced quality/size
                 # Fallback chain: 720p+audio > 480p+audio > 360p+audio > best available
@@ -491,14 +494,14 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # For Twitter/X URLs, we need to extract only the main tweet, not quoted/replied tweets
                 # Use skip_download=True first to get metadata and filter out playlists
-                if 'twitter.com' in url or 'x.com' in url:
+                if 'twitter.com' in download_url or 'x.com' in download_url:
                     # Extract info without downloading to check if it's a playlist
                     extract_opts = ydl_opts.copy()
                     extract_opts['skip_download'] = True
                     extract_opts['quiet'] = True
                     
                     with yt_dlp.YoutubeDL(extract_opts) as extract_ydl:
-                        info = extract_ydl.extract_info(url, download=False)
+                        info = extract_ydl.extract_info(download_url, download=False)
                     
                     # If it's a playlist, only take the first entry (main tweet)
                     if info.get('_type') == 'playlist' and 'entries' in info:
@@ -506,20 +509,20 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                         main_video_id = info['entries'][0].get('id')
                         if main_video_id:
                             # Construct URL for just the main tweet
-                            if 'twitter.com' in url:
-                                url = f"https://twitter.com/i/web/status/{main_video_id}"
+                            if 'twitter.com' in download_url:
+                                download_url = f"https://twitter.com/i/web/status/{main_video_id}"
                             else:
-                                url = f"https://x.com/i/web/status/{main_video_id}"
+                                download_url = f"https://x.com/i/web/status/{main_video_id}"
                     elif isinstance(info, dict) and 'id' in info:
                         # Single video, update URL with proper format
                         video_id = info['id']
-                        if 'twitter.com' in url:
-                            url = f"https://twitter.com/i/web/status/{video_id}"
+                        if 'twitter.com' in download_url:
+                            download_url = f"https://twitter.com/i/web/status/{video_id}"
                         else:
-                            url = f"https://x.com/i/web/status/{video_id}"
+                            download_url = f"https://x.com/i/web/status/{video_id}"
                 
                 # Now download with the filtered URL
-                info = ydl.extract_info(url, download=True)
+                info = ydl.extract_info(download_url, download=True)
                 filename = ydl.prepare_filename(info)
                 return filename
         
