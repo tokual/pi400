@@ -40,13 +40,21 @@ async def show_settings_menu(callback_query: types.CallbackQuery, state: FSMCont
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
     settings_text = (
-        "⚙️ **Encoding Settings**\n\n"
-        "**Preset:** Choose encoding speed/quality tradeoff\n"
-        "• Very Fast 720p30: Fastest, lower quality (~1-2x real time)\n"
-        "• Fast 720p30: Balanced, good quality (~2-3x real time)\n"
-        "• Fast 1080p30: Better quality, higher resolution (~3-5x real time)\n"
-        "• HQ 720p30: Best quality, slowest (~4-6x real time)\n\n"
-        f"**Current:** {current_preset}"
+        "⚙️ *Encoding Settings*\n\n"
+        "Choose your preset based on video length and desired quality:\n\n"
+        "⚡ *Very Fast 720p30 (1-2x real time)*\n"
+        "Fast encoding, lower quality\n"
+        "Best for: Long videos, limited time\n\n"
+        "⚙️ *Fast 720p30 (2-3x real time)*\n"
+        "Balanced speed and quality\n"
+        "Best for: Most videos (recommended)\n\n"
+        "🎬 *Fast 1080p30 (3-5x real time)*\n"
+        "Better resolution, slower encoding\n"
+        "Best for: Short videos, need quality\n\n"
+        "🎯 *HQ 720p30 (4-6x real time)*\n"
+        "Best quality, slowest encoding\n"
+        "Best for: Professional use\n\n"
+        f"📌 *Current:* {current_preset}"
     )
     
     await callback_query.message.edit_text(settings_text, reply_markup=keyboard, parse_mode="Markdown")

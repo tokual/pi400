@@ -160,24 +160,33 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
     try:
         # Validate URL
         if not validate_url(url):
-            await message.answer("❌ Invalid URL. Please provide a valid video link.")
+            await message.answer(
+                "❌ *Invalid URL*\n\n"
+                "Please provide a valid video link starting with http:// or https://\n\n"
+                "Examples:\n"
+                "• https://www.youtube.com/watch?v=...\n"
+                "• https://www.tiktok.com/@.../video/...\n"
+                "• https://x.com/.../status/..."
+            )
             return
         
         # Send status message
-        status_msg = await message.answer("🔍 Validating URL...")
+        status_msg = await message.answer("🔍 Validating URL and checking video info...")
         
         # Get file size
         logger.info(f"Checking file size for URL: {url[:50]}...")
-        await status_msg.edit_text("📊 Checking video size...")
+        await status_msg.edit_text("📊 Analyzing video metadata...")
         
         file_size = await get_file_size(url)
         
         if file_size and file_size > config.MAX_FILE_SIZE:
             await status_msg.edit_text(
-                f"❌ Video too large!\n\n"
-                f"File size: {file_size / (1024*1024):.1f}MB\n"
-                f"Max size: {config.MAX_FILE_SIZE / (1024*1024):.0f}MB\n\n"
-                f"Please choose a shorter video or lower quality."
+                f"❌ *Video Too Large*\n\n"
+                f"📏 File size: {file_size / (1024*1024):.1f}MB\n"
+                f"📏 Max allowed: {config.MAX_FILE_SIZE / (1024*1024):.0f}MB\n\n"
+                f"💡 Try:\n"
+                f"• A shorter video\n"
+                f"• A lower quality preset in Settings"
             )
             logger.warning(f"User {user_id} attempted to download {file_size / (1024*1024):.1f}MB file")
             return
@@ -187,14 +196,27 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
         logger.info(f"Created temp directory: {temp_dir}")
         
         # Download video
-        await status_msg.edit_text("⬇️ Downloading video...")
+        await status_msg.edit_text("⬇️ Downloading video...\n_This may take a few minutes..._")
         logger.info(f"Starting download for user {user_id}")
         
-        downloaded_file = await download_video(url, temp_dir, status_msg)
-        logger.info(f"Downloaded: {downloaded_file}")
+        try:
+            downloaded_file = await download_video(url, temp_dir, status_msg)
+            logger.info(f"Downloaded: {downloaded_file}")
+        except Exception as e:
+            await status_msg.edit_text(
+                f"❌ *Download Failed*\n\n"
+                f"Error: {str(e)[:100]}\n\n"
+                f"💡 The video URL might be:\n"
+                f"• Invalid or expired\n"
+                f"• From an unsupported platform\n"
+                f"• Protected/private\n\n"
+                f"Try another video or check the URL."
+            )
+            logger.error(f"Download error for user {user_id}: {str(e)}")
+            return
         
         # Encode video
-        await status_msg.edit_text("⚙️ Encoding video (this may take a while)...")
+        await status_msg.edit_text("⚙️ Encoding video...\n_This may take 1-10 minutes depending on length_")
         logger.info(f"Starting encoding for user {user_id}")
         
         output_file = os.path.join(temp_dir, "encoded.mp4")
@@ -203,7 +225,14 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
         success = await encode_with_handbrake(downloaded_file, output_file, preset, status_msg)
         
         if not success:
-            await status_msg.edit_text("❌ Encoding failed. Please try another video.")
+            await status_msg.edit_text(
+                f"❌ *Encoding Failed*\n\n"
+                f"The video encoding process encountered an error.\n\n"
+                f"💡 Try:\n"
+                f"• A shorter video\n"
+                f"• A faster preset (Settings → ⚙️)\n"
+                f"• A different video"
+            )
             logger.error(f"Encoding failed for user {user_id}")
             return
         
@@ -211,14 +240,17 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
         output_size = os.path.getsize(output_file)
         if output_size > config.MAX_FILE_SIZE:
             await status_msg.edit_text(
-                f"❌ Encoded file is too large for Telegram!\n\n"
-                f"Encoded size: {output_size / (1024*1024):.1f}MB (max 50MB)\n\n"
-                f"Try a shorter video or lower quality preset."
+                f"❌ *Encoded File Too Large*\n\n"
+                f"📏 Result: {output_size / (1024*1024):.1f}MB (max 50MB)\n\n"
+                f"💡 Try:\n"
+                f"• A shorter video\n"
+                f"• A faster preset (Settings → ⚙️)\n"
+                f"• Lower resolution on source"
             )
             return
         
         # Upload to Telegram
-        await status_msg.edit_text("📤 Uploading to Telegram...")
+        await status_msg.edit_text("📤 Uploading to Telegram...\n_Almost done!_")
         logger.info(f"Uploading file for user {user_id}")
         
         with open(output_file, 'rb') as video_file:
@@ -229,13 +261,17 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
                 parse_mode="Markdown"
             )
         
-        await status_msg.edit_text("✅ Download complete! Check above for your video.")
+        await status_msg.edit_text("✅ Done! Your video has been sent above.\n\nUse /start to download another video.")
         logger.info(f"Successfully processed video for user {user_id}")
         
     except Exception as e:
         logger.error(f"Error processing download: {str(e)}")
         if status_msg:
-            await status_msg.edit_text(f"❌ Error: {str(e)[:100]}")
+            await status_msg.edit_text(
+                f"❌ *Unexpected Error*\n\n"
+                f"Something went wrong: {str(e)[:80]}\n\n"
+                f"Please try again or contact support."
+            )
     
     finally:
         # Cleanup temp directory

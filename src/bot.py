@@ -51,6 +51,8 @@ async def start_handler(message: types.Message, state: FSMContext, db: Database)
     
     logger.info(f"User {user_id} started the bot")
     
+    await state.clear()
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬇️ Download Video", callback_data="start_download")],
         [InlineKeyboardButton(text="⚙️ Settings", callback_data="show_settings")],
@@ -58,10 +60,18 @@ async def start_handler(message: types.Message, state: FSMContext, db: Database)
     ])
     
     await message.answer(
-        "🎬 **Video Download Bot**\n\n"
-        "Send me a video URL from YouTube, TikTok, X, or any supported platform "
-        "and I'll download and encode it for you.\n\n"
-        "Use the buttons below to get started.",
+        "🎬 *Video Download Bot*\n\n"
+        "Download and encode videos from YouTube, TikTok, X, Instagram, and 1000+ other platforms!\n\n"
+        "📝 *How to use:*\n"
+        "1️⃣ Click 'Download Video' or just send me a URL\n"
+        "2️⃣ I'll process and encode your video\n"
+        "3️⃣ Receive your video in Telegram\n\n"
+        "⚙️ *Features:*\n"
+        "• Supports 1000+ video platforms\n"
+        "• Multiple encoding presets\n"
+        "• Auto-cleanup of temp files\n"
+        "• Real-time progress updates\n\n"
+        "👇 Get started below or just paste a video URL!",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
@@ -76,19 +86,31 @@ async def help_handler(callback_query: types.CallbackQuery, state: FSMContext, d
         return
     
     help_text = (
-        "**📖 How to Use**\n\n"
-        "1. Send me a video URL (YouTube, TikTok, X, etc.)\n"
-        "2. Choose your encoding preferences\n"
-        "3. I'll download, encode, and send you the file\n\n"
-        "**⚙️ Supported Platforms:**\n"
-        "• YouTube\n"
-        "• TikTok\n"
-        "• X (Twitter)\n"
-        "• Instagram\n"
-        "• Facebook\n"
-        "• And 1000+ more via yt-dlp\n\n"
-        "**📊 File Size Limit:** 50MB\n"
-        "**🎬 Output:** H.264 MP4, 720p Mobile\n"
+        "📖 *How to Use*\n\n"
+        "1️⃣ *Send a Video URL*\n"
+        "Just paste any video link:\n"
+        "• YouTube: youtube.com/watch?v=...\n"
+        "• TikTok: tiktok.com/@.../video/...\n"
+        "• Instagram, X, Facebook, etc.\n"
+        "• And 1000+ more platforms!\n\n"
+        "2️⃣ *Choose Quality (Optional)*\n"
+        "Use Settings → ⚙️ to pick encoding speed\n\n"
+        "3️⃣ *Wait for Processing*\n"
+        "• Download takes 1-5 minutes\n"
+        "• Encoding takes 2-10 minutes\n"
+        "• Progress updates shown in real-time\n\n"
+        "4️⃣ *Get Your Video*\n"
+        "Video sent when ready!\n\n"
+        "⚙️ *Encoding Presets*\n"
+        "• Very Fast: Lowest quality, fastest (1-2x)\n"
+        "• Fast: Good quality, faster (2-3x)\n"
+        "• Fast 1080p: Better resolution (3-5x)\n"
+        "• HQ: Best quality, slowest (4-6x)\n\n"
+        "❓ *Troubleshooting*\n"
+        "• Video too large? Try shorter clips\n"
+        "• Encoding slow? Use Very Fast preset\n"
+        "• URL not working? Try another video\n\n"
+        "💡 Max file size: 50MB"
     )
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -157,14 +179,14 @@ async def url_message_handler(message: types.Message, state: FSMContext, db: Dat
         return
     
     current_state = await state.get_state()
-    if current_state != DownloadStates.waiting_for_url.state:
-        return
-    
     url = message.text
-    logger.info(f"User {user_id} submitted URL: {url[:50]}...")
     
-    # Call download handler
-    await download_handler.process_download(message, state, db, url, BotConfig)
+    # Check if we're in waiting_for_url state or if user just sent a URL
+    if current_state == DownloadStates.waiting_for_url.state or url.startswith(('http://', 'https://')):
+        logger.info(f"User {user_id} submitted URL: {url[:50]}...")
+        
+        # Call download handler
+        await download_handler.process_download(message, state, db, url, BotConfig)
 
 
 async def show_settings_handler(callback_query: types.CallbackQuery, state: FSMContext, db: Database):
@@ -181,17 +203,36 @@ async def show_settings_handler(callback_query: types.CallbackQuery, state: FSMC
 async def setup_handlers(dp: Dispatcher, db: Database):
     """Register all message and callback handlers."""
     
+    # Create handler wrappers that inject db parameter
+    async def start_handler_wrapper(message: types.Message, state: FSMContext):
+        return await start_handler(message, state, db)
+    
+    async def help_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
+        return await help_handler(callback_query, state, db)
+    
+    async def back_to_menu_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
+        return await back_to_menu_handler(callback_query, state, db)
+    
+    async def start_download_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
+        return await start_download_handler(callback_query, state, db)
+    
+    async def show_settings_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
+        return await show_settings_handler(callback_query, state, db)
+    
+    async def url_message_wrapper(message: types.Message, state: FSMContext):
+        return await url_message_handler(message, state, db)
+    
     # Command handlers
-    dp.message.register(start_handler, Command("start"))
+    dp.message.register(start_handler_wrapper, Command("start"))
     
     # Callback query handlers
-    dp.callback_query.register(help_handler, F.data == "show_help")
-    dp.callback_query.register(back_to_menu_handler, F.data == "back_to_menu")
-    dp.callback_query.register(start_download_handler, F.data == "start_download")
-    dp.callback_query.register(show_settings_handler, F.data == "show_settings")
+    dp.callback_query.register(help_handler_wrapper, F.data == "show_help")
+    dp.callback_query.register(back_to_menu_wrapper, F.data == "back_to_menu")
+    dp.callback_query.register(start_download_wrapper, F.data == "start_download")
+    dp.callback_query.register(show_settings_wrapper, F.data == "show_settings")
     
-    # Message handlers for URL input
-    dp.message.register(url_message_handler)
+    # Message handlers for URL input (must be last to not interfere with other handlers)
+    dp.message.register(url_message_wrapper)
     
     # Settings handlers
     await settings_handler.register_handlers(dp, db)
