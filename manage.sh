@@ -144,37 +144,138 @@ cmd_update() {
 
 # Uninstall bot
 cmd_uninstall() {
-    echo -e "${RED}⚠ WARNING: This will completely remove the bot!${NC}"
-    read -p "Continue? (yes/no): " confirm
+    echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║                    ⚠  WARNING  ⚠                          ║${NC}"
+    echo -e "${RED}║                                                            ║${NC}"
+    echo -e "${RED}║  This will COMPLETELY REMOVE the bot and ALL data:        ║${NC}"
+    echo -e "${RED}║                                                            ║${NC}"
+    echo -e "${RED}║  • Bot service and daemon                                  ║${NC}"
+    echo -e "${RED}║  • Bot directory (/opt/video-bot)                          ║${NC}"
+    echo -e "${RED}║  • Database and user settings                              ║${NC}"
+    echo -e "${RED}║  • System user (_video-bot)                                ║${NC}"
+    echo -e "${RED}║  • Python virtual environment                              ║${NC}"
+    echo -e "${RED}║  • Temporary files                                         ║${NC}"
+    echo -e "${RED}║  • System dependencies (optional)                          ║${NC}"
+    echo -e "${RED}║                                                            ║${NC}"
+    echo -e "${RED}║  This action CANNOT be undone!                             ║${NC}"
+    echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    read -p "Type 'DELETE EVERYTHING' to confirm uninstall: " confirm
     
-    if [ "$confirm" != "yes" ]; then
-        echo "Cancelled."
+    if [ "$confirm" != "DELETE EVERYTHING" ]; then
+        echo -e "${YELLOW}Cancelled.${NC}"
         return
     fi
     
+    echo ""
     echo -e "${YELLOW}Uninstalling bot...${NC}"
+    echo ""
     
     # Stop service
-    echo "Stopping service..."
+    echo -e "${YELLOW}[1/11] Stopping service...${NC}"
     sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    echo -e "${GREEN}✓ Service stopped${NC}"
     
     # Disable service
-    echo "Disabling service..."
+    echo -e "${YELLOW}[2/11] Disabling service...${NC}"
     sudo systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+    echo -e "${GREEN}✓ Service disabled${NC}"
     
     # Remove service file
-    echo "Removing service file..."
+    echo -e "${YELLOW}[3/11] Removing systemd service file...${NC}"
     sudo rm -f "/etc/systemd/system/$SERVICE_NAME"
+    echo -e "${GREEN}✓ Service file removed${NC}"
     
     # Reload systemd
-    echo "Reloading systemd..."
+    echo -e "${YELLOW}[4/11] Reloading systemd daemon...${NC}"
     sudo systemctl daemon-reload
+    sudo systemctl reset-failed 2>/dev/null || true
+    echo -e "${GREEN}✓ Systemd reloaded${NC}"
+    
+    # Clean up temporary files in /tmp
+    echo -e "${YELLOW}[5/11] Cleaning up temporary files...${NC}"
+    sudo rm -rf /tmp/video-bot-* 2>/dev/null || true
+    sudo rm -rf /tmp/yt-dlp-* 2>/dev/null || true
+    sudo rm -rf /tmp/*.mp4 2>/dev/null || true
+    sudo rm -rf /tmp/*.mkv 2>/dev/null || true
+    echo -e "${GREEN}✓ Temporary files cleaned${NC}"
     
     # Remove bot directory
-    echo "Removing bot directory..."
-    sudo rm -rf "$BOT_DIR"
+    echo -e "${YELLOW}[6/11] Removing bot directory and all data...${NC}"
+    if [ -d "$BOT_DIR" ]; then
+        # Clean up Python cache files first
+        sudo find "$BOT_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+        sudo find "$BOT_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
+        sudo find "$BOT_DIR" -type f -name "*.pyo" -delete 2>/dev/null || true
+        
+        # Remove the entire directory
+        sudo rm -rf "$BOT_DIR"
+        echo -e "${GREEN}✓ Bot directory removed${NC}"
+    else
+        echo -e "${YELLOW}⚠ Bot directory not found (already removed?)${NC}"
+    fi
     
-    echo -e "${GREEN}✓ Bot uninstalled${NC}"
+    # Remove system user
+    echo -e "${YELLOW}[7/11] Removing system user...${NC}"
+    if id "_video-bot" &>/dev/null; then
+        sudo userdel "_video-bot" 2>/dev/null || true
+        echo -e "${GREEN}✓ System user removed${NC}"
+    else
+        echo -e "${YELLOW}⚠ System user not found (already removed?)${NC}"
+    fi
+    
+    # Remove system group
+    echo -e "${YELLOW}[8/11] Removing system group...${NC}"
+    if getent group "_video-bot" &>/dev/null; then
+        sudo groupdel "_video-bot" 2>/dev/null || true
+        echo -e "${GREEN}✓ System group removed${NC}"
+    else
+        echo -e "${YELLOW}⚠ System group not found (already removed?)${NC}"
+    fi
+    
+    # Clean up logs
+    echo -e "${YELLOW}[9/11] Cleaning up service logs...${NC}"
+    sudo journalctl --vacuum-time=1s --unit="$SERVICE_NAME" 2>/dev/null || true
+    echo -e "${GREEN}✓ Logs cleaned${NC}"
+    
+    # Ask about system dependencies
+    echo ""
+    echo -e "${YELLOW}[10/11] Remove system dependencies?${NC}"
+    echo "The following packages were installed for the bot:"
+    echo "  • handbrake-cli (video transcoding)"
+    echo "  • ffmpeg (video processing)"
+    echo "  • python3-venv (Python virtual environments)"
+    echo "  • python3-dev (Python development headers)"
+    echo ""
+    echo -e "${YELLOW}Note: These may be used by other applications.${NC}"
+    read -p "Remove system dependencies? (yes/no): " remove_deps
+    
+    if [ "$remove_deps" = "yes" ]; then
+        echo -e "${YELLOW}Removing system dependencies...${NC}"
+        sudo apt-get remove -y handbrake-cli ffmpeg python3-venv python3-dev 2>/dev/null || true
+        sudo apt-get autoremove -y 2>/dev/null || true
+        echo -e "${GREEN}✓ System dependencies removed${NC}"
+    else
+        echo -e "${YELLOW}⚠ Skipping system dependencies removal${NC}"
+    fi
+    
+    # Final cleanup
+    echo -e "${YELLOW}[11/11] Final cleanup...${NC}"
+    # Remove any remaining configuration or cache files
+    sudo rm -rf ~/.cache/yt-dlp 2>/dev/null || true
+    echo -e "${GREEN}✓ Cleanup complete${NC}"
+    
+    echo ""
+    echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║                 ✓ Uninstall Complete                       ║${NC}"
+    echo -e "${GREEN}║                                                            ║${NC}"
+    echo -e "${GREEN}║  The bot has been completely removed from your system.    ║${NC}"
+    echo -e "${GREEN}║                                                            ║${NC}"
+    echo -e "${GREEN}║  To reinstall:                                            ║${NC}"
+    echo -e "${GREEN}║    1. Clone the repository again                          ║${NC}"
+    echo -e "${GREEN}║    2. Run: sudo ./install.sh                              ║${NC}"
+    echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
 }
 
 # Main
