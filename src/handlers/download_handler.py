@@ -328,15 +328,19 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
             # /best: Fallback if separate streams not available
             format_str = f'bestvideo[vcodec=h264][height<={max_height}]+bestaudio[acodec=aac]/best[ext=mp4]'
             
-            # Prepare ffmpeg postprocessor arguments with aspect ratio correction
+            # Prepare ffmpeg postprocessor arguments with SAR metadata fix for iOS
+            # Use scale filter with setsar=1 to properly reset Sample Aspect Ratio (SAR)
+            # iOS strictly interprets SAR metadata; incorrect SAR causes video distortion
             ffmpeg_args = ['-b:v', bitrate_limit]
             
-            # Add explicit aspect ratio to fix mobile (iOS) display issues
-            # This corrects Pixel Aspect Ratio (SAR) metadata that can get corrupted during remux
+            # Build scale filter to preserve aspect ratio and reset SAR metadata
             if source_width and source_height:
-                aspect_ratio = f"{source_width}:{source_height}"
-                ffmpeg_args.extend(['-aspect', aspect_ratio])
-                logger.info(f"Source dimensions: {source_width}x{source_height}, aspect ratio: {aspect_ratio}")
+                # Scale to max height while preserving aspect ratio
+                # Using force_original_aspect_ratio=decrease to shrink if needed
+                # setsar=1 forces square pixels (correct SAR metadata for iOS)
+                scale_filter = f"scale=min(iw\\,{source_width}):min(ih\\,{source_height}):force_original_aspect_ratio=decrease,setsar=1"
+                ffmpeg_args.extend(['-vf', scale_filter])
+                logger.info(f"Source dimensions: {source_width}x{source_height}, applying scale filter with SAR reset for iOS compatibility")
             
             ydl_opts = {
                 'format': format_str,
