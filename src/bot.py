@@ -77,6 +77,39 @@ async def start_handler(message: types.Message, state: FSMContext, db: Database)
     )
 
 
+async def cancel_handler(message: types.Message, state: FSMContext, db: Database):
+    """Handle /cancel command to clear stuck download states."""
+    user_id = message.from_user.id
+    
+    if not await check_authorization(user_id, db):
+        logger.warning(f"Unauthorized cancel attempt from user {user_id}")
+        await message.answer("❌ You are not authorized to use this bot.")
+        return
+    
+    # Get current state
+    current_state = await state.get_state()
+    
+    # Clear the state
+    await state.clear()
+    
+    logger.info(f"User {user_id} cancelled download (was in state: {current_state})")
+    
+    if current_state:
+        await message.answer(
+            "✅ *Download Cancelled*\n\n"
+            "Any ongoing download has been stopped and state cleared.\n"
+            "You can now start a new download by sending a video URL.",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            "ℹ️ *No Active Download*\n\n"
+            "There was no download in progress.\n"
+            "Send me a video URL to get started!",
+            parse_mode="Markdown"
+        )
+
+
 async def help_handler(callback_query: types.CallbackQuery, state: FSMContext, db: Database):
     """Show help information."""
     user_id = callback_query.from_user.id
@@ -99,9 +132,13 @@ async def help_handler(callback_query: types.CallbackQuery, state: FSMContext, d
         "• Progress updates shown in real-time\n\n"
         "3️⃣ *Get Your Video*\n"
         "Video sent when ready!\n\n"
+        "🛠️ *Commands*\n"
+        "/start - Restart the bot\n"
+        "/cancel - Cancel current download\n\n"
         "❓ *Troubleshooting*\n"
         "• Video too large? Try shorter clips\n"
-        "• URL not working? Try another video\n\n"
+        "• URL not working? Try another video\n"
+        "• Bot stuck? Use /cancel to reset\n\n"
         "💡 Max file size: 50MB"
     )
     
@@ -311,6 +348,9 @@ async def setup_handlers(dp: Dispatcher, db: Database):
     async def start_handler_wrapper(message: types.Message, state: FSMContext):
         return await start_handler(message, state, db)
     
+    async def cancel_handler_wrapper(message: types.Message, state: FSMContext):
+        return await cancel_handler(message, state, db)
+    
     async def help_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
         return await help_handler(callback_query, state, db)
     
@@ -328,6 +368,7 @@ async def setup_handlers(dp: Dispatcher, db: Database):
     
     # Command handlers
     dp.message.register(start_handler_wrapper, Command("start"))
+    dp.message.register(cancel_handler_wrapper, Command("cancel"))
     
     # Callback query handlers
     dp.callback_query.register(help_handler_wrapper, F.data == "show_help")

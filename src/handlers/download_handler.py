@@ -633,6 +633,7 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
                 except Exception:
                     pass
                 logger.error(f"Download timeout for user {user_id}")
+                await state.clear()
                 return
             except Exception as e:
                 try:
@@ -649,6 +650,7 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
                 except Exception:
                     pass
                 logger.error(f"Download error for user {user_id}: {str(e)}")
+                await state.clear()
                 return
             
             # Get downloaded file size and duration
@@ -709,6 +711,7 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
                 status_msg = await message.answer("✅ Download successful!\n📤 Uploading to Telegram...")
             except Exception as e:
                 logger.error(f"Failed to send upload status to user {user_id}: {e}")
+                await state.clear()
                 return
             
             # Upload video
