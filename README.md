@@ -5,7 +5,7 @@ Secure, easy-to-use Telegram bot for downloading and encoding videos from YouTub
 ## Features
 
 - 🎬 Download videos from YouTube, TikTok, X, Instagram, and 1000+ other platforms
-- ⚙️ Encode with HandBrake (720p mobile preset, configurable)
+- ⚡ Automatic optimization with dynamic resolution/bitrate selection
 - 🔒 User whitelist authentication (only authorized users can use)
 - 💾 SQLite database for user settings and history
 - 📊 Real-time progress notifications
@@ -102,17 +102,16 @@ sudo ./manage.sh uninstall
    https://www.tiktok.com/@.../video/...
    https://x.com/.../status/...
    ```
-3. **Choose encoding preset** (if prompted)
-4. **Wait** for download and encoding to complete
-5. **Receive** the encoded video in Telegram
+3. **Wait** for download and optimization to complete
+4. **Receive** the optimized video in Telegram
 
-### Encoding Presets
+### Automatic Optimization
 
-- **⚡ Fast (1h+ video)**: Fast encoding, lower quality (~1-2x real time)
-- **⚙️ Balanced**: Good balance of quality and speed (~2-3x real time)
-- **🎬 Quality (short video)**: Best quality, slower (~3-5x real time)
+Videos are automatically optimized based on duration:
+- **Short videos (≤60s)**: 720p resolution @ 2 Mbps
+- **Long videos (>60s)**: 480p resolution @ 1.6 Mbps
 
-Change preset anytime via `/settings` in Telegram.
+Both use H.264 video + AAC audio for maximum Telegram compatibility.
 
 ## Directory Structure
 
@@ -150,7 +149,7 @@ Common issues:
 
 ### Encoding is slow
 
-The Raspberry Pi 4 encodes at ~2-3x real time. Use "Fast" preset for longer videos.
+The Raspberry Pi 4 no longer does any encoding - videos are optimized during download using yt-dlp's native format selection and FFmpeg stream copy (remuxing), which is 50-100x faster than traditional encoding.
 
 ### Video upload fails
 

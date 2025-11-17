@@ -33,10 +33,7 @@ class DownloadStates(StatesGroup):
     """FSM states for download flow."""
     waiting_for_url = State()
     waiting_for_confirmation = State()
-    waiting_for_encoding_choice = State()
     downloading = State()
-    encoding = State()
-    uploading = State()
 
 
 async def check_authorization(user_id: int, db: Database) -> bool:
@@ -65,14 +62,14 @@ async def start_handler(message: types.Message, state: FSMContext, db: Database)
     
     await message.answer(
         "🎬 *Video Download Bot*\n\n"
-        "Download and encode videos from YouTube, TikTok, X, Instagram, and 1000+ other platforms!\n\n"
+        "Download videos from YouTube, TikTok, X, Instagram, and 1000+ other platforms!\n\n"
         "📝 *How to use:*\n"
         "1️⃣ Click 'Download Video' or just send me a URL\n"
-        "2️⃣ I'll process and encode your video\n"
+        "2️⃣ I'll download and optimize your video\n"
         "3️⃣ Receive your video in Telegram\n\n"
         "⚙️ *Features:*\n"
         "• Supports 1000+ video platforms\n"
-        "• Multiple encoding presets\n"
+        "• Automatic optimization\n"
         "• Auto-cleanup of temp files\n"
         "• Real-time progress updates\n\n"
         "👇 Get started below or just paste a video URL!",
@@ -97,22 +94,14 @@ async def help_handler(callback_query: types.CallbackQuery, state: FSMContext, d
         "• TikTok: tiktok.com/@.../video/...\n"
         "• Instagram, X, Facebook, etc.\n"
         "• And 1000+ more platforms!\n\n"
-        "2️⃣ *Choose Quality (Optional)*\n"
-        "Use Settings → ⚙️ to pick encoding speed\n\n"
-        "3️⃣ *Wait for Processing*\n"
+        "2️⃣ *Wait for Processing*\n"
         "• Download takes 1-5 minutes\n"
-        "• Encoding takes 2-10 minutes\n"
+        "• Automatic optimization applied\n"
         "• Progress updates shown in real-time\n\n"
-        "4️⃣ *Get Your Video*\n"
+        "3️⃣ *Get Your Video*\n"
         "Video sent when ready!\n\n"
-        "⚙️ *Encoding Presets*\n"
-        "• Very Fast: Lowest quality, fastest (1-2x)\n"
-        "• Fast: Good quality, faster (2-3x)\n"
-        "• Fast 1080p: Better resolution (3-5x)\n"
-        "• HQ: Best quality, slowest (4-6x)\n\n"
         "❓ *Troubleshooting*\n"
         "• Video too large? Try shorter clips\n"
-        "• Encoding slow? Use Very Fast preset\n"
         "• URL not working? Try another video\n\n"
         "💡 Max file size: 50MB"
     )
@@ -144,7 +133,7 @@ async def back_to_menu_handler(callback_query: types.CallbackQuery, state: FSMCo
     await callback_query.message.edit_text(
         "🎬 **Video Download Bot**\n\n"
         "Send me a video URL from YouTube, TikTok, X, or any supported platform "
-        "and I'll download and encode it for you.",
+        "and I'll download and optimize it for you.",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
@@ -325,101 +314,6 @@ async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMCo
         await callback_query.answer("❓ Please choose Yes or No", show_alert=True)
 
 
-async def encoding_choice_handler(callback_query: types.CallbackQuery, state: FSMContext, db: Database):
-    """Handle encoding quality choice from user."""
-    user_id = callback_query.from_user.id
-    
-    if not await check_authorization(user_id, db):
-        await callback_query.answer("❌ Unauthorized", show_alert=True)
-        return
-    
-    # Validate FSM state
-    current_state = await state.get_state()
-    if current_state != DownloadStates.waiting_for_encoding_choice.state:
-        logger.warning(f"User {user_id} sent encoding choice in wrong state: {current_state}")
-        await callback_query.answer("❌ Invalid state. Please start over.", show_alert=True)
-        return
-    
-    # Validate callback data
-    if not callback_query.data or not isinstance(callback_query.data, str):
-        await callback_query.answer("❌ Invalid request", show_alert=True)
-        return
-    
-    # Handle skip encoding
-    if callback_query.data == "encode_skip":
-        logger.info(f"User {user_id} skipped encoding")
-        await callback_query.answer("⏭️ Skipped encoding")
-        
-        # Get state data to clean up temp files
-        state_data = await state.get_data()
-        temp_dir = state_data.get('temp_dir')
-        
-        # Cleanup temp directory
-        if temp_dir:
-            import threading
-            def cleanup():
-                try:
-                    if os.path.isdir(temp_dir):
-                        shutil.rmtree(temp_dir)
-                        logger.debug(f"Cleaned up temp directory for user {user_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to cleanup temp directory for user {user_id}: {e}")
-            
-            thread = threading.Thread(target=cleanup, daemon=True)
-            thread.start()
-        
-        await state.clear()
-        
-        # Send menu
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬇️ Download Video", callback_data="start_download")],
-            [InlineKeyboardButton(text="⚙️ Settings", callback_data="show_settings")],
-            [InlineKeyboardButton(text="ℹ️ Help", callback_data="show_help")],
-        ])
-        
-        try:
-            await callback_query.message.answer(
-                "🎬 *Video Download Bot*\n\n"
-                "Download and encode videos from YouTube, TikTok, X, Instagram, and 1000+ other platforms!",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.error(f"Failed to send menu to user {user_id}: {e}")
-        
-        return
-    
-    # Handle quality selection
-    if callback_query.data.startswith("encode_quality:"):
-        chosen_quality = callback_query.data.split(":", 1)[1]
-        
-        # Validate quality
-        if chosen_quality not in ['720p', '480p', '360p']:
-            logger.warning(f"User {user_id} sent invalid quality: {chosen_quality}")
-            await callback_query.answer("❌ Invalid quality", show_alert=True)
-            return
-        
-        logger.info(f"User {user_id} chose {chosen_quality} encoding")
-        await callback_query.answer(f"✅ Encoding at {chosen_quality}...")
-        
-        # Delete the choices message
-        try:
-            await callback_query.message.delete()
-        except Exception as e:
-            logger.debug(f"Failed to delete choices message for user {user_id}: {e}")
-        
-        # Get message for status updates
-        message = callback_query.message
-        
-        # Process encoding
-        await download_handler.handle_encoding_choice(user_id, message, state, db, chosen_quality, BotConfig, DownloadStates)
-        return
-    
-    # Invalid callback data
-    logger.warning(f"Invalid encoding choice callback from user {user_id}: {callback_query.data}")
-    await callback_query.answer("❌ Invalid choice", show_alert=True)
-
-
 async def setup_handlers(dp: Dispatcher, db: Database):
     """Register all message and callback handlers."""
     
@@ -445,9 +339,6 @@ async def setup_handlers(dp: Dispatcher, db: Database):
     async def url_message_wrapper(message: types.Message, state: FSMContext):
         return await url_message_handler(message, state, db)
     
-    async def encoding_choice_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
-        return await encoding_choice_handler(callback_query, state, db)
-    
     # Command handlers
     dp.message.register(start_handler_wrapper, Command("start"))
     
@@ -457,7 +348,6 @@ async def setup_handlers(dp: Dispatcher, db: Database):
     dp.callback_query.register(start_download_wrapper, F.data == "start_download")
     dp.callback_query.register(show_settings_wrapper, F.data == "show_settings")
     dp.callback_query.register(confirmation_wrapper, F.data.in_(["confirm_yes", "confirm_no"]))
-    dp.callback_query.register(encoding_choice_wrapper, F.data.startswith("encode_quality:") | (F.data == "encode_skip"))
     
     # Message handlers for URL input (must be last to not interfere with other handlers)
     dp.message.register(url_message_wrapper)

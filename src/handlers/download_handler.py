@@ -28,22 +28,6 @@ SUPPORTED_DOMAINS = [
     'instagram.com', 'facebook.com', 'vimeo.com', 'dailymotion.com'
 ]
 
-# Quality settings for different resolutions (quality value, description)
-QUALITY_SETTINGS = {
-    '720p': {'quality': '28', 'label': '720p (smaller, slower)'},
-    '480p': {'quality': '28', 'label': '480p (recommended)'},
-    '360p': {'quality': '30', 'label': '360p (tiny, slowest)'},
-}
-
-# Estimated file size per minute of video (in MB) for different qualities
-# Based on empirical results: aggressive compression for mobile/Telegram compatibility
-EST_SIZE_PER_MINUTE = {
-    '720p': 1.5,    # ~1.5 MB per minute (720p, quality=28, aac 96kbps)
-    '480p': 0.8,    # ~0.8 MB per minute (480p, quality=28, aac 96kbps) - empirically 17MB for 20min
-    '360p': 0.4,    # ~0.4 MB per minute (360p, quality=30, aac 96kbps)
-}
-
-
 def is_retryable_error(error: Exception) -> bool:
     """Classify if an error is retryable or not.
     
@@ -141,164 +125,6 @@ async def retry_with_backoff(
     raise last_error
 
 
-def estimate_encoding_sizes(duration_seconds: int) -> dict:
-    """Estimate encoded file sizes for different quality levels with 10% safety buffer.
-    
-    Args:
-        duration_seconds: Video duration in seconds
-    
-    Returns:
-        Dict with quality -> estimated_size_mb, or empty dict if duration invalid
-    """
-    if not duration_seconds or duration_seconds <= 0:
-        return {}
-    
-    duration_minutes = duration_seconds / 60.0
-    estimates = {}
-    
-    for quality, size_per_min in EST_SIZE_PER_MINUTE.items():
-        # Calculate base estimate and add 10% safety buffer
-        base_estimate = duration_minutes * size_per_min
-        estimated_size = base_estimate * 1.1
-        estimates[quality] = estimated_size
-    
-    return estimates
-
-
-async def show_encoding_choices_keyboard(duration_seconds: int) -> tuple:
-    """Generate inline keyboard with encoding quality options.
-    
-    Filters out options where estimate exceeds 50MB threshold.
-    
-    Args:
-        duration_seconds: Video duration in seconds for size estimation
-    
-    Returns:
-        Tuple of (InlineKeyboardMarkup, dict of available estimates)
-    """
-    estimates = estimate_encoding_sizes(duration_seconds)
-    MAX_SIZE_MB = 50
-    
-    available_options = []
-    available_estimates = {}
-    
-    for quality in ['720p', '480p', '360p']:
-        estimated_size = estimates.get(quality, 0)
-        if estimated_size <= MAX_SIZE_MB:
-            available_options.append(quality)
-            available_estimates[quality] = estimated_size
-    
-    # Build keyboard buttons
-    buttons = []
-    for quality in available_options:
-        estimated_size = available_estimates[quality]
-        label = QUALITY_SETTINGS[quality]['label']
-        buttons.append(
-            InlineKeyboardButton(
-                text=f"{label} (~{estimated_size:.1f}MB)",
-                callback_data=f"encode_quality:{quality}"
-            )
-        )
-    
-    # Add skip button
-    buttons.append(
-        InlineKeyboardButton(
-            text="⏭️ Skip Encoding",
-            callback_data="encode_skip"
-        )
-    )
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[btn] for btn in buttons])
-    return keyboard, available_estimates
-
-
-async def upload_original_and_ask_encoding(user_id: int, message: types.Message, state: FSMContext, original_file: str, duration_seconds: int, temp_dir: str) -> bool:
-    """Upload original video and show encoding choice keyboard.
-    
-    Args:
-        user_id: User ID
-        message: Message object for sending
-        state: FSM context
-        original_file: Path to original video file
-        duration_seconds: Video duration in seconds
-        temp_dir: Temporary directory path
-    
-    Returns:
-        True if upload successful, False otherwise
-    """
-    try:
-        # Check file exists
-        if not os.path.exists(original_file):
-            logger.error(f"Original file not found: {original_file}")
-            try:
-                await message.answer("❌ Original file not found.")
-            except Exception:
-                pass
-            return False
-        
-        # Get file size
-        file_size_mb = os.path.getsize(original_file) / (1024 * 1024)
-        
-        # Upload original video with retry logic
-        try:
-            upload_msg = await message.answer("📤 Uploading original video...")
-            
-            # Get or create semaphore for this user to limit concurrent uploads
-            if user_id not in _upload_semaphores:
-                _upload_semaphores[user_id] = asyncio.Semaphore(1)
-            
-            async with _upload_semaphores[user_id]:
-                async def upload_task():
-                    return await message.bot.send_video(
-                        chat_id=user_id,
-                        video=FSInputFile(original_file),
-                        caption=f"📹 *Original Video* ({file_size_mb:.1f}MB)\n\nChoose encoding quality below or skip.",
-                        parse_mode="Markdown"
-                    )
-                
-                video_msg = await retry_with_backoff(upload_task, max_attempts=3, user_id=user_id)
-            
-            await upload_msg.delete()
-        except Exception as e:
-            logger.error(f"Failed to upload original for user {user_id}: {e}")
-            try:
-                await message.answer(f"❌ Upload failed: {str(e)[:100]}")
-            except Exception:
-                pass
-            return False
-        
-        # Save state data for encoding handler
-        try:
-            await state.update_data(
-                original_file=original_file,
-                temp_dir=temp_dir,
-                duration_seconds=duration_seconds,
-                original_uploaded=True
-            )
-        except Exception as e:
-            logger.error(f"Failed to save state for user {user_id}: {e}")
-        
-        # Show encoding choices
-        keyboard, estimates = await show_encoding_choices_keyboard(duration_seconds)
-        
-        try:
-            await message.answer(
-                "⚙️ *Encoding Options*\n\n"
-                "Would you like to encode the video to a smaller size?\n\n"
-                "_Estimates include 10% safety buffer_",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.error(f"Failed to show encoding choices for user {user_id}: {e}")
-            return False
-        
-        return True
-    except Exception as e:
-        logger.error(f"Error in upload_original_and_ask_encoding for user {user_id}: {e}")
-        return False
-
-
 def validate_url(url: str) -> bool:
     """Validate if URL is from a supported platform.
     
@@ -387,30 +213,6 @@ async def get_file_size(url: str, timeout: int = 30) -> Optional[tuple[int, int]
     except Exception as e:
         logger.error(f"Error getting file size: {str(e)}")
         return None, None
-
-
-def estimate_encoded_size(duration_seconds: int, preset: str) -> int:
-    """Estimate encoded file size based on preset and duration.
-    
-    Encoding presets produce different bitrates:
-    - Very Fast 720p30: ~1.5 Mbps (lower bitrate)
-    - Fast 720p30: ~2.0 Mbps (balanced)
-    - Fast 1080p30: ~3.0 Mbps (higher resolution)
-    - HQ 720p30 Surround: ~2.5 Mbps (includes audio overhead)
-    """
-    bitrate_map = {
-        'Very Fast 720p30': 1.5,  # Mbps
-        'Fast 720p30': 2.0,
-        'Fast 1080p30': 3.0,
-        'HQ 720p30 Surround': 2.5,
-    }
-    
-    # Get bitrate for preset (default to 2.0 if unknown)
-    mbps = bitrate_map.get(preset, 2.0)
-    
-    # Calculate: duration * bitrate + overhead for audio and metadata (~5%)
-    encoded_size = (duration_seconds * mbps * 1024 * 1024) / 8
-    return int(encoded_size * 1.05)  # Add 5% overhead
 
 
 def sanitize_filename(filename: str) -> str:
@@ -650,56 +452,6 @@ async def update_download_progress(message: types.Message, data: dict):
         logger.debug(f"Progress update error: {str(e)}")
 
 
-async def encode_with_handbrake(input_file: str, output_file: str, preset: str, status_msg: types.Message, quality: str = '24') -> bool:
-    """Encode video using HandBrake CLI for aggressive compression.
-    
-    Optimized for Raspberry Pi 4 performance and mobile device compatibility.
-    Uses lower bitrates and higher quality settings for minimal file size.
-    
-    Args:
-        input_file: Path to input video file
-        output_file: Path to output video file
-        preset: HandBrake preset (Fast, Balanced, Quality)
-        status_msg: Message to update with progress
-        quality: Quality setting (e.g., '24', '28', '30'). Higher number = faster/smaller but lower quality.
-    """
-    try:
-        cmd = [
-            'HandBrakeCLI',
-            '-i', input_file,
-            '-o', output_file,
-            '--preset', preset,
-            '-q', quality,
-            '-e', 'x264',
-            '--encoder-preset', 'veryfast',  # Faster encoding on Pi
-            '-a', '1',
-            '-E', 'aac',
-            '-B', '96',  # Reduced from 128kbps to 96kbps (sufficient for web video)
-            '--format', 'av_mp4',
-        ]
-        
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=3600)
-        
-        if process.returncode != 0:
-            logger.error(f"HandBrake error: {stderr.decode()}")
-            return False
-        
-        await status_msg.edit_text("⚙️ Encoding complete!")
-        return True
-    except asyncio.TimeoutError:
-        logger.error("HandBrake encoding timeout")
-        return False
-    except Exception as e:
-        logger.error(f"HandBrake error: {str(e)}")
-        return False
-
-
 async def _get_semaphore(user_id: int) -> asyncio.Semaphore:
     """Get or create a semaphore for a user to limit concurrent downloads."""
     if user_id not in _download_semaphores:
@@ -853,9 +605,8 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
 async def execute_confirmed_download(user_id: int, message: types.Message, state: FSMContext, db: Database, url: str, config, download_states=None):
     """Execute download after user confirmation (skips file size re-check).
     
-    Implements two-stage flow:
-    - Small files (≤50MB): Download original → Upload original → Ask for encoding quality
-    - Large files (>50MB): Download original → Ask for encoding quality from start (no original upload)
+    Downloads video and uploads directly to Telegram. Video is already optimized by yt-dlp
+    with dynamic resolution/bitrate selection (720p for ≤60s, 480p for >60s).
     
     Args:
         user_id: The ID of the user who initiated the download (not from message.from_user)
@@ -949,67 +700,121 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
                 downloaded_size = 0
                 duration_seconds = 0
             
-            # Two-stage flow decision
-            if downloaded_size <= config.MAX_FILE_SIZE:
-                # Small file: Upload original first, then ask about encoding
-                logger.info(f"Small file ({downloaded_size / (1024*1024):.1f}MB) for user {user_id}: uploading original and asking for encoding")
-                
+            # Upload the optimized video directly
+            logger.info(f"Uploading optimized video ({downloaded_size / (1024*1024):.1f}MB) for user {user_id}")
+            
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+            
+            # File is already optimized by yt-dlp with dynamic resolution/bitrate
+            output_file = downloaded_file
+            
+            # Check file size
+            try:
+                output_size = os.path.getsize(output_file)
+                logger.info(f"Uploading optimized video: {output_size / (1024*1024):.1f}MB for user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to get file size for user {user_id}: {e}")
                 try:
-                    await status_msg.delete()
+                    await message.answer("❌ Error checking video file size.")
                 except Exception:
                     pass
-                
-                # Upload original and show encoding choices
-                success = await upload_original_and_ask_encoding(user_id, message, state, downloaded_file, duration_seconds, temp_dir)
-                if success:
-                    if download_states:
-                        await state.set_state(download_states.waiting_for_encoding_choice.state)
-                        logger.info(f"FSM state set to waiting_for_encoding_choice for user {user_id}")
-                    return
-                else:
-                    logger.error(f"Failed to upload original for user {user_id}")
-                    return
-            else:
-                # Large file: Ask about encoding quality from the start (show keyboard with no original upload)
-                logger.info(f"Large file ({downloaded_size / (1024*1024):.1f}MB) for user {user_id}: asking for encoding quality")
-                
-                try:
-                    await status_msg.delete()
-                except Exception:
-                    pass
-                
-                # Show encoding choices keyboard
-                keyboard, estimates = await show_encoding_choices_keyboard(duration_seconds)
-                
+                await state.clear()
+                return
+            
+            # Check if file is too large
+            if output_size > int(config.MAX_FILE_SIZE * 1.1):
                 try:
                     await message.answer(
-                        "⚙️ *Encoding Required*\n\n"
-                        f"📏 Source file: {downloaded_size / (1024*1024):.1f}MB (too large to upload)\n\n"
-                        "Choose encoding quality to reduce file size:\n\n"
-                        "_Estimates include 10% safety buffer_",
-                        reply_markup=keyboard,
+                        f"❌ *Video Too Large*\n\n"
+                        f"📏 Size: {output_size / (1024*1024):.1f}MB (limit ~55MB)\n\n"
+                        f"💡 Try a shorter video or different source",
                         parse_mode="Markdown"
                     )
-                except Exception as e:
-                    logger.error(f"Failed to show encoding choices for user {user_id}: {e}")
-                    return
-                
-                # Save state data for encoding handler
-                try:
-                    await state.update_data(
-                        downloaded_file=downloaded_file,
-                        temp_dir=temp_dir,
-                        duration_seconds=duration_seconds,
-                        original_uploaded=False,
-                        url=url
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to save state for user {user_id}: {e}")
-                
-                if download_states:
-                    await state.set_state(download_states.waiting_for_encoding_choice.state)
-                    logger.info(f"FSM state set to waiting_for_encoding_choice for user {user_id}")
+                except Exception:
+                    pass
+                await state.clear()
                 return
+            
+            # Send status
+            try:
+                status_msg = await message.answer("✅ Download successful!\n📤 Uploading to Telegram...")
+            except Exception as e:
+                logger.error(f"Failed to send upload status to user {user_id}: {e}")
+                return
+            
+            # Upload video
+            try:
+                if user_id not in _upload_semaphores:
+                    _upload_semaphores[user_id] = asyncio.Semaphore(1)
+                
+                async with _upload_semaphores[user_id]:
+                    async def upload_task():
+                        return await message.bot.send_video(
+                            chat_id=user_id,
+                            video=FSInputFile(output_file),
+                            caption=f"✅ *Video Downloaded*\n\n📏 Size: {output_size / (1024*1024):.1f}MB",
+                            parse_mode="Markdown"
+                        )
+                    
+                    logger.info(f"Starting upload for optimized file ({output_size / (1024*1024):.1f}MB)")
+                    video_msg = await retry_with_backoff(upload_task, max_attempts=3, user_id=user_id)
+                    logger.info(f"Successfully uploaded video for user {user_id}")
+            except Exception as e:
+                logger.error(f"Upload failed for user {user_id}: {e}")
+                try:
+                    await status_msg.edit_text(
+                        f"❌ *Upload Failed*\n\n"
+                        f"The video could not be sent to Telegram.\n\n"
+                        f"Error: {str(e)[:80]}\n\n"
+                        f"Please try again or contact support."
+                    )
+                except Exception:
+                    pass
+                await state.clear()
+                return
+            
+            # Success! Delete status message
+            try:
+                await status_msg.delete()
+            except Exception as e:
+                logger.debug(f"Failed to delete status message for user {user_id}: {e}")
+            
+            # Send completion
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⬇️ Download Another", callback_data="start_download")],
+                [InlineKeyboardButton(text="⚙️ Settings", callback_data="show_settings")],
+            ])
+            
+            try:
+                await message.answer(
+                    "🎬 *Done!*\n\n"
+                    "Your video is ready. Download another or return to menu.",
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to send completion message to user {user_id}: {e}")
+            
+            await state.clear()
+            
+            # Cleanup temp directory
+            try:
+                import threading
+                def cleanup():
+                    try:
+                        if os.path.isdir(temp_dir):
+                            shutil.rmtree(temp_dir)
+                            logger.debug(f"Cleaned up temp directory for user {user_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup temp directory for user {user_id}: {e}")
+                
+                thread = threading.Thread(target=cleanup, daemon=True)
+                thread.start()
+            except Exception:
+                pass
         
         except Exception as e:
             logger.error(f"Error in execute_confirmed_download: {str(e)}")
@@ -1025,205 +830,20 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
             await state.clear()
         
         finally:
-            # Cleanup temp directory if we got here with an error and haven't saved state
-            if temp_dir and downloaded_file:
+            # Cleanup temp directory if we got here with an error
+            if temp_dir:
                 try:
-                    state_data = await state.get_data()
-                    # Only cleanup if state doesn't have the files saved (error case)
-                    if 'downloaded_file' not in state_data and 'original_file' not in state_data:
-                        import threading
-                        def cleanup():
-                            try:
-                                if os.path.isdir(temp_dir):
-                                    shutil.rmtree(temp_dir)
-                            except Exception:
-                                pass
-                        thread = threading.Thread(target=cleanup, daemon=True)
-                        thread.start()
+                    import threading
+                    def cleanup():
+                        try:
+                            if os.path.isdir(temp_dir):
+                                shutil.rmtree(temp_dir)
+                        except Exception:
+                            pass
+                    thread = threading.Thread(target=cleanup, daemon=True)
+                    thread.start()
                 except Exception:
                     pass
-
-
-async def handle_encoding_choice(user_id: int, message: types.Message, state: FSMContext, db: Database, chosen_quality: str, config, download_states=None):
-    """Handle user's encoding quality choice and perform encoding + upload.
-    
-    Args:
-        user_id: User ID
-        message: Message object for status updates
-        state: FSM context
-        db: Database instance
-        chosen_quality: Quality choice ('720p', '480p', '360p')
-        config: Bot configuration
-        download_states: FSM states (optional)
-    """
-    status_msg = None
-    
-    try:
-        # Get state data
-        state_data = await state.get_data()
-        downloaded_file = state_data.get('downloaded_file') or state_data.get('original_file')
-        temp_dir = state_data.get('temp_dir')
-        duration_seconds = state_data.get('duration_seconds', 0)
-        original_uploaded = state_data.get('original_uploaded', False)
-        
-        if not downloaded_file or not temp_dir:
-            logger.error(f"Missing state data for user {user_id}: downloaded_file={bool(downloaded_file)}, temp_dir={bool(temp_dir)}")
-            try:
-                await message.answer("❌ Error: State data missing. Please start again.")
-            except Exception:
-                pass
-            await state.clear()
-            return
-        
-        # The downloaded file is already optimized with yt-dlp native format selection + stream copy
-        # No re-encoding needed - file downloaded with dynamic resolution/bitrate limiting
-        output_file = downloaded_file
-        
-        # Check file size
-        try:
-            output_size = os.path.getsize(output_file)
-            logger.info(f"Optimized {chosen_quality} video ready: {output_size / (1024*1024):.1f}MB for user {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to get file size for user {user_id}: {e}")
-            try:
-                await message.answer("❌ Error checking video file size.")
-            except Exception:
-                pass
-            await state.clear()
-            return
-        
-        # Check if file is too large
-        MAX_SIZE_WITH_TOLERANCE = int(config.MAX_FILE_SIZE * 1.1)  # 10% tolerance (55MB)
-        if output_size > MAX_SIZE_WITH_TOLERANCE:
-            try:
-                await message.answer(
-                    f"❌ *Video Too Large*\n\n"
-                    f"📏 Size: {output_size / (1024*1024):.1f}MB (limit ~55MB)\n\n"
-                    f"💡 Try a shorter video or different source",
-                    parse_mode="Markdown"
-                )
-            except Exception:
-                pass
-            logger.error(f"Video file too large for user {user_id}: {output_size / (1024*1024):.1f}MB")
-            await state.clear()
-            return
-        
-        # Send status message
-        try:
-            status_msg = await message.answer("✅ Video ready!\n📤 Uploading to Telegram...")
-        except Exception as e:
-            logger.error(f"Failed to send status message to user {user_id}: {e}")
-            return
-        
-        if download_states:
-            await state.set_state(download_states.uploading.state)
-            logger.info(f"FSM state set to uploading for user {user_id}")
-        
-        logger.info(f"Uploading {chosen_quality} encoded file for user {user_id}")
-        
-        # Defensive check: ensure output file exists before upload
-        if not os.path.exists(output_file):
-            logger.error(f"Output file does not exist: {output_file}")
-            try:
-                await status_msg.edit_text(
-                    f"❌ *File Error*\n\n"
-                    f"The encoded video file was not found.\n\n"
-                    f"Please try again or contact support."
-                )
-            except Exception:
-                pass
-            await state.clear()
-            return
-        
-        try:
-            # Get or create semaphore for this user to limit concurrent uploads
-            if user_id not in _upload_semaphores:
-                _upload_semaphores[user_id] = asyncio.Semaphore(1)
-            
-            async with _upload_semaphores[user_id]:
-                async def upload_task():
-                    return await message.bot.send_video(
-                        chat_id=user_id,
-                        video=FSInputFile(output_file),
-                        caption=f"✅ *Your {chosen_quality} Video*!\n\n📏 Size: {output_size / (1024*1024):.1f}MB",
-                        parse_mode="Markdown"
-                    )
-                
-                logger.info(f"Starting upload attempt for {chosen_quality} file ({output_size / (1024*1024):.1f}MB)")
-                video_msg = await retry_with_backoff(upload_task, max_attempts=3, user_id=user_id)
-                logger.info(f"Successfully uploaded {chosen_quality} video for user {user_id}")
-        except Exception as e:
-            logger.error(f"Upload failed for user {user_id}: {e}")
-            try:
-                await status_msg.edit_text(
-                    f"❌ *Upload Failed*\n\n"
-                    f"The video could not be sent to Telegram.\n\n"
-                    f"Error: {str(e)[:80]}\n\n"
-                    f"Please try again or contact support."
-                )
-            except Exception:
-                pass
-            await state.clear()
-            return
-        
-        # Success! Delete status message
-        try:
-            await status_msg.delete()
-        except Exception as e:
-            logger.debug(f"Failed to delete status message for user {user_id}: {e}")
-        
-        # Send completion with options
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬇️ Download Another", callback_data="start_download")],
-            [InlineKeyboardButton(text="⚙️ Settings", callback_data="show_settings")],
-        ])
-        
-        try:
-            await message.answer(
-                "🎬 *Done!*\n\n"
-                "Your video is ready. You can download another or adjust settings.",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.error(f"Failed to send completion message to user {user_id}: {e}")
-        
-        await state.clear()
-        logger.info(f"Download complete for user {user_id}: {chosen_quality}")
-        
-    except Exception as e:
-        logger.error(f"Error in handle_encoding_choice: {str(e)}")
-        if status_msg:
-            try:
-                await status_msg.edit_text(
-                    f"❌ *Unexpected Error*\n\n"
-                    f"Something went wrong: {str(e)[:80]}\n\n"
-                    f"Please try again or contact support."
-                )
-            except Exception:
-                pass
-        await state.clear()
-    
-    finally:
-        # Ensure temp directory cleanup on all paths (success or error)
-        try:
-            state_data = await state.get_data()
-            temp_dir = state_data.get('temp_dir')
-            
-            if temp_dir and os.path.isdir(temp_dir):
-                import threading
-                def cleanup():
-                    try:
-                        if os.path.isdir(temp_dir):
-                            shutil.rmtree(temp_dir)
-                            logger.debug(f"Cleaned up temp directory for user {user_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to cleanup temp directory for user {user_id}: {e}")
-                
-                thread = threading.Thread(target=cleanup, daemon=True)
-                thread.start()
-        except Exception as e:
-            logger.warning(f"Error in finally cleanup for user {user_id}: {e}")
 
 
 # End of file
