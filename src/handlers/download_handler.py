@@ -525,6 +525,11 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                     update_download_progress(status_msg, d)
                 )],
                 'prefer_free_formats': True,  # Prefer formats without premium/restricted access
+                'extractor_args': {
+                    'youtube': {
+                        'skip': ['hls', 'dash']  # Skip HLS/DASH - use direct formats
+                    }
+                }
             }
             
             try:
@@ -537,17 +542,38 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 # If primary download fails (e.g., age-restricted content), try fallback
                 logger.warning(f"Primary download attempt failed: {e}. Retrying with fallback options...")
                 
-                # Fallback: Try with different yt-dlp approach (remove bitrate/codec restrictions)
-                fallback_opts = ydl_opts.copy()
-                fallback_opts['quiet'] = True
-                fallback_opts['format'] = 'best[ext=mp4]/best'  # Less restrictive format selection
+                # Fallback 1: Try without height restrictions
+                fallback_opts_1 = ydl_opts.copy()
+                fallback_opts_1['quiet'] = True
+                fallback_opts_1['format'] = f'bestvideo[vcodec=h264]+bestaudio[acodec=aac]/best[ext=mp4]'
                 
                 try:
-                    with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                    with yt_dlp.YoutubeDL(fallback_opts_1) as ydl:
                         info = ydl.extract_info(download_url, download=True)
                         filename = ydl.prepare_filename(info)
-                        logger.info(f"Fallback download successful")
+                        logger.info(f"Fallback 1 (no height restriction) successful")
                         return filename
+                except Exception as e2:
+                    logger.warning(f"Fallback 1 failed: {e2}. Trying aggressive fallback...")
+                    
+                    # Fallback 2: Very aggressive - just get any playable format
+                    fallback_opts_2 = {
+                        'format': 'best',
+                        'quiet': True,
+                        'socket_timeout': 30,
+                        'playlist_items': '1',
+                        'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+                        'prefer_free_formats': True,
+                    }
+                    
+                    try:
+                        with yt_dlp.YoutubeDL(fallback_opts_2) as ydl:
+                            info = ydl.extract_info(download_url, download=True)
+                            filename = ydl.prepare_filename(info)
+                            logger.info(f"Fallback 2 (best format) successful")
+                            return filename
+                    except Exception as e3:
+                        logger.error(f"All download attempts failed: {e3}")
                 except Exception as fallback_error:
                     # Both attempts failed
                     logger.error(f"Fallback download also failed: {fallback_error}")
