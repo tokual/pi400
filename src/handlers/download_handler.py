@@ -290,9 +290,25 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 logger.warning(f"Could not get duration: {e}. Defaulting to 480p.")
                 return 120  # Default to longer duration assumption (480p)
         
+        async def _get_source_dimensions():
+            """Get source video dimensions to calculate aspect ratio."""
+            try:
+                with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    width = info.get('width')
+                    height = info.get('height')
+                    if width and height:
+                        return width, height
+            except Exception as e:
+                logger.warning(f"Could not get source video dimensions: {e}")
+            return None, None
+        
         async def _download(duration_seconds: int):
             # Local variable to avoid Python 3.13 scoping issues with nested async functions
             download_url = url
+            
+            # Get source video dimensions for aspect ratio correction
+            source_width, source_height = await _get_source_dimensions()
             
             # Dynamically select resolution based on duration
             # Short videos (≤60s): 720p for better quality
@@ -312,11 +328,21 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
             # /best: Fallback if separate streams not available
             format_str = f'bestvideo[vcodec=h264][height<={max_height}]+bestaudio[acodec=aac]/best[ext=mp4]'
             
+            # Prepare ffmpeg postprocessor arguments with aspect ratio correction
+            ffmpeg_args = ['-b:v', bitrate_limit]
+            
+            # Add explicit aspect ratio to fix mobile (iOS) display issues
+            # This corrects Pixel Aspect Ratio (SAR) metadata that can get corrupted during remux
+            if source_width and source_height:
+                aspect_ratio = f"{source_width}:{source_height}"
+                ffmpeg_args.extend(['-aspect', aspect_ratio])
+                logger.info(f"Source dimensions: {source_width}x{source_height}, aspect ratio: {aspect_ratio}")
+            
             ydl_opts = {
                 'format': format_str,
                 'remux_video': 'mp4',  # Stream copy to MP4 container (no re-encoding)
                 'postprocessor_args': {
-                    'ffmpeg': ['-b:v', bitrate_limit]  # Limit video bitrate via ffmpeg
+                    'ffmpeg': ffmpeg_args
                 },
                 'quiet': False,
                 'no_warnings': False,
@@ -752,22 +778,7 @@ async def execute_confirmed_download(user_id: int, message: types.Message, state
             except Exception as e:
                 logger.debug(f"Failed to delete status message for user {user_id}: {e}")
             
-            # Send completion
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬇️ Download Another", callback_data="start_download")],
-                [InlineKeyboardButton(text="⚙️ Settings", callback_data="show_settings")],
-            ])
-            
-            try:
-                await message.answer(
-                    "🎬 *Done!*\n\n"
-                    "Your video is ready. Download another or return to menu.",
-                    reply_markup=keyboard,
-                    parse_mode="Markdown"
-                )
-            except Exception as e:
-                logger.error(f"Failed to send completion message to user {user_id}: {e}")
-            
+            # Download complete - just clear state, no completion message needed
             await state.clear()
             
             # Cleanup temp directory

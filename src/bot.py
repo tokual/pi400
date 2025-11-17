@@ -12,7 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from src.database import Database
 from src.utils import logger, get_user_setting, set_user_setting
-from src.handlers import download_handler, settings_handler
+from src.handlers import download_handler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -56,7 +56,6 @@ async def start_handler(message: types.Message, state: FSMContext, db: Database)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬇️ Download Video", callback_data="start_download")],
-        [InlineKeyboardButton(text="⚙️ Settings", callback_data="show_settings")],
         [InlineKeyboardButton(text="ℹ️ Help", callback_data="show_help")],
     ])
     
@@ -126,7 +125,6 @@ async def back_to_menu_handler(callback_query: types.CallbackQuery, state: FSMCo
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬇️ Download Video", callback_data="start_download")],
-        [InlineKeyboardButton(text="⚙️ Settings", callback_data="show_settings")],
         [InlineKeyboardButton(text="ℹ️ Help", callback_data="show_help")],
     ])
     
@@ -205,17 +203,6 @@ async def url_message_handler(message: types.Message, state: FSMContext, db: Dat
     
     # Call download handler
     await download_handler.process_download(message, state, db, url, BotConfig, DownloadStates)
-
-
-async def show_settings_handler(callback_query: types.CallbackQuery, state: FSMContext, db: Database):
-    """Show settings menu."""
-    user_id = callback_query.from_user.id
-    
-    if not await check_authorization(user_id, db):
-        await callback_query.answer("❌ Unauthorized", show_alert=True)
-        return
-    
-    await settings_handler.show_settings_menu(callback_query, state, db)
 
 
 async def confirmation_handler(callback_query: types.CallbackQuery, state: FSMContext, db: Database):
@@ -333,9 +320,6 @@ async def setup_handlers(dp: Dispatcher, db: Database):
     async def start_download_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
         return await start_download_handler(callback_query, state, db)
     
-    async def show_settings_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
-        return await show_settings_handler(callback_query, state, db)
-    
     async def confirmation_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
         return await confirmation_handler(callback_query, state, db)
     
@@ -349,14 +333,10 @@ async def setup_handlers(dp: Dispatcher, db: Database):
     dp.callback_query.register(help_handler_wrapper, F.data == "show_help")
     dp.callback_query.register(back_to_menu_wrapper, F.data == "back_to_menu")
     dp.callback_query.register(start_download_wrapper, F.data == "start_download")
-    dp.callback_query.register(show_settings_wrapper, F.data == "show_settings")
     dp.callback_query.register(confirmation_wrapper, F.data.in_(["confirm_yes", "confirm_no"]))
     
     # Message handlers for URL input (must be last to not interfere with other handlers)
     dp.message.register(url_message_wrapper)
-    
-    # Settings handlers
-    await settings_handler.register_handlers(dp, db)
 
 
 async def main():
