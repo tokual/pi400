@@ -35,7 +35,7 @@ cmd_start() {
     
     # Auto-update yt-dlp to latest version
     echo -e "${YELLOW}Updating yt-dlp to latest version...${NC}"
-    "$BOT_DIR/venv/bin/pip" install --upgrade yt-dlp --quiet
+    sudo "$BOT_DIR/venv/bin/pip" install --upgrade yt-dlp
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ yt-dlp updated${NC}"
     else
@@ -69,7 +69,7 @@ cmd_restart() {
     
     # Auto-update yt-dlp to latest version
     echo -e "${YELLOW}Updating yt-dlp to latest version...${NC}"
-    "$BOT_DIR/venv/bin/pip" install --upgrade yt-dlp --quiet
+    sudo "$BOT_DIR/venv/bin/pip" install --upgrade yt-dlp
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ yt-dlp updated${NC}"
     else
@@ -122,7 +122,14 @@ cmd_update() {
         exit 1
     fi
     
-    # Restart service (startup.sh will handle dependency updates)
+    # Update Python dependencies (required for any requirements.txt changes)
+    echo "Updating Python dependencies..."
+    sudo "$BOT_DIR/venv/bin/pip" install --upgrade -r "$BOT_DIR/requirements.txt"
+    if [ $? -ne 0 ]; then
+        echo -e "${YELLOW}⚠ Warning: Failed to update dependencies, continuing anyway${NC}"
+    fi
+    
+    # Restart service
     echo "Restarting service..."
     sudo systemctl start "$SERVICE_NAME"
     sleep 3
