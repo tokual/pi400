@@ -32,6 +32,16 @@ show_help() {
 # Start service
 cmd_start() {
     echo -e "${YELLOW}Starting bot...${NC}"
+    
+    # Auto-update yt-dlp to latest version
+    echo -e "${YELLOW}Updating yt-dlp to latest version...${NC}"
+    "$BOT_DIR/venv/bin/pip" install --upgrade yt-dlp --quiet
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ yt-dlp updated${NC}"
+    else
+        echo -e "${YELLOW}⚠ Warning: yt-dlp update had issues, continuing anyway${NC}"
+    fi
+    
     sudo systemctl start "$SERVICE_NAME"
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ Bot started${NC}"
@@ -56,6 +66,16 @@ cmd_stop() {
 # Restart service
 cmd_restart() {
     echo -e "${YELLOW}Restarting bot...${NC}"
+    
+    # Auto-update yt-dlp to latest version
+    echo -e "${YELLOW}Updating yt-dlp to latest version...${NC}"
+    "$BOT_DIR/venv/bin/pip" install --upgrade yt-dlp --quiet
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ yt-dlp updated${NC}"
+    else
+        echo -e "${YELLOW}⚠ Warning: yt-dlp update had issues, continuing anyway${NC}"
+    fi
+    
     sudo systemctl restart "$SERVICE_NAME"
     sleep 2
     if sudo systemctl is-active --quiet "$SERVICE_NAME"; then

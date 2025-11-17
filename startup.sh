@@ -39,6 +39,15 @@ else
     # Don't exit, continue with bot startup
 fi
 
+# Explicitly ensure yt-dlp is at latest version (critical for YouTube extraction)
+echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] Ensuring yt-dlp is at latest version...${NC}"
+if pip install -q --upgrade yt-dlp 2>/dev/null; then
+    YT_DLP_VERSION=$(python3 -c "import yt_dlp; print(yt_dlp.__version__)" 2>/dev/null || echo "unknown")
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] yt-dlp updated to $YT_DLP_VERSION${NC}"
+else
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] Warning: Could not update yt-dlp, continuing with current version${NC}"
+fi
+
 # Start the bot
 echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] Starting bot...${NC}"
 python3 -m src.bot
