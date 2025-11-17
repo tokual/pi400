@@ -290,64 +290,30 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 logger.warning(f"Could not get duration: {e}. Defaulting to 480p.")
                 return 120  # Default to longer duration assumption (480p)
         
-        async def _get_source_dimensions():
-            """Get source video dimensions to calculate aspect ratio."""
-            try:
-                with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    width = info.get('width')
-                    height = info.get('height')
-                    if width and height:
-                        return width, height
-            except Exception as e:
-                logger.warning(f"Could not get source video dimensions: {e}")
-            return None, None
-        
         async def _download(duration_seconds: int):
             # Local variable to avoid Python 3.13 scoping issues with nested async functions
             download_url = url
-            
-            # Get source video dimensions for aspect ratio correction
-            source_width, source_height = await _get_source_dimensions()
             
             # Dynamically select resolution based on duration
             # Short videos (≤60s): 720p for better quality
             # Long videos (>60s): 480p for reasonable file size
             if duration_seconds <= 60:
                 max_height = 720
-                bitrate_limit = '2M'  # 2Mbps for short videos (aligned with Telegram iOS)
-                logger.info(f"Short video ({duration_seconds}s): using 720p + 2Mbps")
+                logger.info(f"Short video ({duration_seconds}s): using 720p")
             else:
                 max_height = 480
-                bitrate_limit = '1.6M'  # 1.6Mbps for longer videos (Telegram 480p standard)
-                logger.info(f"Long video ({duration_seconds}s): using 480p + 1.6Mbps")
+                logger.info(f"Long video ({duration_seconds}s): using 480p")
             
-            # Format selection: H.264 video + AAC audio (no VBR filter - too restrictive for YouTube)
-            # bestvideo: Best H.264 video track at specified height
-            # bestaudio[acodec=aac]: Best AAC audio track
-            # /best: Fallback if separate streams not available
-            format_str = f'bestvideo[vcodec=h264][height<={max_height}]+bestaudio[acodec=aac]/best[ext=mp4]'
-            
-            # Prepare ffmpeg postprocessor arguments with SAR metadata fix for iOS
-            # Use scale filter with setsar=1 to properly reset Sample Aspect Ratio (SAR)
-            # iOS strictly interprets SAR metadata; incorrect SAR causes video distortion
-            ffmpeg_args = ['-b:v', bitrate_limit]
-            
-            # Build scale filter to preserve aspect ratio and reset SAR metadata
-            if source_width and source_height:
-                # Scale to max height while preserving aspect ratio
-                # Using force_original_aspect_ratio=decrease to shrink if needed
-                # setsar=1 forces square pixels (correct SAR metadata for iOS)
-                scale_filter = f"scale=min(iw\\,{source_width}):min(ih\\,{source_height}):force_original_aspect_ratio=decrease,setsar=1"
-                ffmpeg_args.extend(['-vf', scale_filter])
-                logger.info(f"Source dimensions: {source_width}x{source_height}, applying scale filter with SAR reset for iOS compatibility")
+            # Format selection: H.264 video + AAC audio
+            # bestvideo[height<=X]: Best H.264 video at specified height
+            # bestaudio: Best audio track
+            # merge_output_format handles aspect ratio automatically when merging streams
+            # This is the proven approach used by mirror-leech-telegram-bot (3,943 stars)
+            format_str = f'bestvideo[vcodec^=avc][height<={max_height}]+bestaudio/best[height<={max_height}]'
             
             ydl_opts = {
                 'format': format_str,
-                'remux_video': 'mp4',  # Stream copy to MP4 container (no re-encoding)
-                'postprocessor_args': {
-                    'ffmpeg': ffmpeg_args
-                },
+                'merge_output_format': 'mp4',  # Native yt-dlp merge with correct aspect ratio
                 'quiet': False,
                 'no_warnings': False,
                 'socket_timeout': 30,
@@ -377,7 +343,7 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
                 # Fallback 1: Try without height restrictions
                 fallback_opts_1 = ydl_opts.copy()
                 fallback_opts_1['quiet'] = True
-                fallback_opts_1['format'] = f'bestvideo[vcodec=h264]+bestaudio[acodec=aac]/best[ext=mp4]'
+                fallback_opts_1['format'] = 'bestvideo[vcodec^=avc]+bestaudio/best'
                 
                 try:
                     with yt_dlp.YoutubeDL(fallback_opts_1) as ydl:
