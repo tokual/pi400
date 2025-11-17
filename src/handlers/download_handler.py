@@ -497,12 +497,12 @@ async def download_video(url: str, temp_dir: str, status_msg: types.Message, tim
             # Long videos (>60s): 480p for reasonable file size
             if duration_seconds <= 60:
                 max_height = 720
-                bitrate_limit = '5M'  # 5Mbps for short videos
-                logger.info(f"Short video ({duration_seconds}s): using 720p + 5Mbps")
+                bitrate_limit = '2M'  # 2Mbps for short videos (aligned with Telegram iOS)
+                logger.info(f"Short video ({duration_seconds}s): using 720p + 2Mbps")
             else:
                 max_height = 480
-                bitrate_limit = '4M'  # 4Mbps for longer videos
-                logger.info(f"Long video ({duration_seconds}s): using 480p + 4Mbps")
+                bitrate_limit = '1.6M'  # 1.6Mbps for longer videos (Telegram 480p standard)
+                logger.info(f"Long video ({duration_seconds}s): using 480p + 1.6Mbps")
             
             # Format selection: H.264 video + AAC audio (no VBR filter - too restrictive for YouTube)
             # bestvideo: Best H.264 video track at specified height
