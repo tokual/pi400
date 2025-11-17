@@ -187,21 +187,24 @@ async def url_message_handler(message: types.Message, state: FSMContext, db: Dat
     # Strip whitespace
     url = url.strip()
     
-    # Validate FSM state - only allow URLs in waiting_for_url state or from menu
-    if current_state and current_state not in [DownloadStates.waiting_for_url.state, None]:
-        logger.warning(f"User {user_id} sent URL in wrong state: {current_state}")
+    # Check if this looks like a URL
+    if not url.startswith(('http://', 'https://')):
+        # Not a URL, ignore it
+        return
+    
+    # Allow URLs anytime, but block if already downloading
+    if current_state == DownloadStates.downloading.state:
+        logger.warning(f"User {user_id} sent URL while downloading: {url[:50]}...")
         try:
-            await message.answer("❌ Please use the menu buttons to start a download.")
+            await message.answer("⏳ Already processing a download. Please wait...")
         except Exception as e:
             logger.error(f"Failed to send state error to user {user_id}: {e}")
         return
     
-    # Check if we're in waiting_for_url state or if user just sent a URL
-    if current_state == DownloadStates.waiting_for_url.state or url.startswith(('http://', 'https://')):
-        logger.info(f"User {user_id} submitted URL: {url[:50]}...")
-        
-        # Call download handler
-        await download_handler.process_download(message, state, db, url, BotConfig, DownloadStates)
+    logger.info(f"User {user_id} submitted URL: {url[:50]}...")
+    
+    # Call download handler
+    await download_handler.process_download(message, state, db, url, BotConfig, DownloadStates)
 
 
 async def show_settings_handler(callback_query: types.CallbackQuery, state: FSMContext, db: Database):

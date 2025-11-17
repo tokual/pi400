@@ -535,46 +535,16 @@ async def process_download(message: types.Message, state: FSMContext, db: Databa
             # Proceed with download anyway
             await execute_confirmed_download(user_id, message, state, db, url, config, download_states)
         elif file_size > config.MAX_FILE_SIZE:  # file_size > 50MB
-            # Get current preset to estimate encoded size
+            # Large file - video is already optimized by yt-dlp during download
+            logger.info(f"Large source file ({file_size / (1024*1024):.0f}MB) for user {user_id}: proceeding with download - will be optimized")
+            
             try:
-                preset = await db.get_user_setting(user_id, 'encoding_preset') or config.HANDBRAKE_PRESET
+                await status_msg.edit_text("⬇️ Large file detected. Starting download with optimization...")
             except Exception as e:
-                logger.error(f"Failed to get preset for user {user_id}: {e}")
-                preset = config.HANDBRAKE_PRESET
+                logger.warning(f"Failed to update status for user {user_id}: {e}")
             
-            estimated_encoded = estimate_encoded_size(duration or 0, preset)
-            
-            # If estimated encoded size is below limit, skip confirmation and proceed directly to download
-            if estimated_encoded <= config.MAX_FILE_SIZE:
-                logger.info(f"Large file (source {file_size / (1024*1024):.0f}MB, estimated {estimated_encoded / (1024*1024):.0f}MB encoded) for user {user_id}: proceeding directly to download")
-                
-                try:
-                    await status_msg.edit_text("✅ File size acceptable after encoding.\n\n⬇️ Starting download...")
-                except Exception as e:
-                    logger.warning(f"Failed to update status for user {user_id}: {e}")
-                
-                # Proceed directly with download (will ask for quality afterward)
-                await execute_confirmed_download(user_id, message, state, db, url, config, download_states)
-            else:
-                # Estimated size still too large
-                try:
-                    await status_msg.edit_text(
-                        f"❌ *Video Likely Too Large*\n\n"
-                        f"📏 Source: {file_size / (1024*1024):.0f}MB\n"
-                        f"📏 Estimated after encoding: ~{estimated_encoded / (1024*1024):.0f}MB\n"
-                        f"📏 Telegram limit: 50MB\n\n"
-                        f"Using preset: *{preset}*\n\n"
-                        f"💡 Try:\n"
-                        f"• A shorter video\n"
-                        f"• Very Fast preset (Settings → ⚙️)\n"
-                        f"• A different video",
-                        parse_mode="Markdown"
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to update status for user {user_id}: {e}")
-                logger.warning(f"User {user_id} file too large even after encoding: {estimated_encoded / (1024*1024):.0f}MB")
-                await state.clear()
-                return
+            # Proceed directly with download
+            await execute_confirmed_download(user_id, message, state, db, url, config, download_states)
         else:
             # File size is OK, proceed with download
             await execute_confirmed_download(user_id, message, state, db, url, config, download_states)
